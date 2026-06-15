@@ -1,0 +1,6 @@
+{
+  "name": "McD Crew Hub & Operations Manager",
+  "description": "A comprehensive operations assistant for McDonald's crew members to search and manage company procedures, log food inventory with granular bulk calculations, track checklists, and share shift updates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

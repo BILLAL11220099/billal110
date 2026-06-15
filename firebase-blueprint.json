@@ -1,0 +1,87 @@
+{
+  "entities": {
+    "CompanyProcedure": {
+      "title": "Company Procedure",
+      "description": "An operational guide or procedure for the McDonald's store crew",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "content": { "type": "string" },
+        "image": { "type": "string" },
+        "lastUpdated": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "title", "category", "content", "lastUpdated", "updatedBy"]
+    },
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Stock count of bulk freezer and raw cooler food inventory items at the store",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "pcsPerInner": { "type": "number" },
+        "innersPerCase": { "type": "number" },
+        "cases": { "type": "number" },
+        "inners": { "type": "number" },
+        "pcs": { "type": "number" },
+        "lastUpdated": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "pcsPerInner", "innersPerCase", "cases", "inners", "pcs", "lastUpdated", "updatedBy"]
+    },
+    "ChecklistItem": {
+      "title": "Checklist Item",
+      "description": "A daily operational shift duty checklist item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "task": { "type": "string" },
+        "category": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "completedBy": { "type": "string" },
+        "timeCompleted": { "type": "string" }
+      },
+      "required": ["id", "task", "category", "completed"]
+    },
+    "NewsFeedPost": {
+      "title": "News Feed Post",
+      "description": "A shift notice or announcement published by crew members on the team newsfeed",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "author": { "type": "string" },
+        "role": { "type": "string" },
+        "text": { "type": "string" },
+        "image": { "type": "string" },
+        "imageName": { "type": "string" },
+        "likes": { "type": "number" },
+        "likedBy": { "type": "array" },
+        "comments": { "type": "array" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "author", "role", "text", "likes", "likedBy", "comments", "timestamp"]
+    }
+  },
+  "firestore": {
+    "procedures": {
+      "schema": "CompanyProcedure",
+      "description": "Shared company procedure guide items"
+    },
+    "inventory": {
+      "schema": "InventoryItem",
+      "description": "Store inventory quantities"
+    },
+    "checklist": {
+      "schema": "ChecklistItem",
+      "description": "Shift completion checklist list"
+    },
+    "feed": {
+      "schema": "NewsFeedPost",
+      "description": "Operations and team announcement feed posts"
+    }
+  }
+}

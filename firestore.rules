@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global safety net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Standard Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. Validation Blueprints (Type/Size validation rules)
+    function isValidCompanyProcedure(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.category is string && data.category.size() <= 100
+        && data.content is string && data.content.size() <= 1000000
+        && (!data.keys().contains('image') || (data.image is string && data.image.size() <= 5000000))
+        && data.lastUpdated is string && data.lastUpdated.size() <= 100
+        && data.updatedBy is string && data.updatedBy.size() <= 100;
+    }
+
+    function isValidInventoryItem(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 250
+        && data.category is string && data.category.size() <= 100
+        && (data.pcsPerInner is int || data.pcsPerInner is float)
+        && (data.innersPerCase is int || data.innersPerCase is float)
+        && (data.cases is int || data.cases is float)
+        && (data.inners is int || data.inners is float)
+        && (data.pcs is int || data.pcs is float)
+        && data.lastUpdated is string && data.lastUpdated.size() <= 100
+        && data.updatedBy is string && data.updatedBy.size() <= 100;
+    }
+
+    function isValidChecklistItem(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.task is string && data.task.size() <= 1000
+        && data.category is string && (data.category == 'Opening' || data.category == 'Shift Handover' || data.category == 'Closing' || data.category == 'Food Safety')
+        && data.completed is bool
+        && (!data.keys().contains('completedBy') || (data.completedBy is string && data.completedBy.size() <= 100))
+        && (!data.keys().contains('timeCompleted') || (data.timeCompleted is string && data.timeCompleted.size() <= 50));
+    }
+
+    function isValidNewsFeedPost(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.author is string && data.author.size() <= 100
+        && data.role is string && (data.role == 'Crew' || data.role == 'Trainer' || data.role == 'Kitchen Leader' || data.role == 'Business Manager')
+        && data.text is string && data.text.size() <= 10000
+        && (!data.keys().contains('image') || (data.image is string && data.image.size() <= 5000000))
+        && (!data.keys().contains('imageName') || (data.imageName is string && data.imageName.size() <= 1000))
+        && data.likes is int
+        && data.likedBy is list && data.likedBy.size() <= 1000
+        && data.comments is list && data.comments.size() <= 500
+        && data.timestamp is string && data.timestamp.size() <= 100;
+    }
+
+    // Collection matches requiring authenticated status
+    match /procedures/{procedureId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(procedureId) && isValidCompanyProcedure(incoming());
+      allow delete: if isSignedIn() && isValidId(procedureId);
+    }
+
+    match /inventory/{inventoryId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(inventoryId) && isValidInventoryItem(incoming());
+      allow delete: if isSignedIn() && isValidId(inventoryId);
+    }
+
+    match /checklist/{checklistId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(checklistId) && isValidChecklistItem(incoming());
+      allow delete: if isSignedIn() && isValidId(checklistId);
+    }
+
+    match /feed/{postId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(postId) && isValidNewsFeedPost(incoming());
+      allow delete: if isSignedIn() && isValidId(postId);
+    }
+  }
+}
