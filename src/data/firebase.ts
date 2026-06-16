@@ -15,15 +15,6 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
 
-// Sign in anonymously in the background to establish valid auth credentials for Zero-Trust security rules
-signInAnonymously(auth)
-  .then(() => {
-    console.log("Firebase background secure authentication contexts initialized.");
-  })
-  .catch((err) => {
-    console.error("Firebase Auth initialization warning:", err);
-  });
-
 // Mandatory Error Handling Types and Helper
 export enum OperationType {
   CREATE = "create",

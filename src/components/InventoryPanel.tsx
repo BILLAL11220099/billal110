@@ -7,9 +7,10 @@ import React, { useState } from "react";
 import { InventoryItem, InventoryCategory, UserSession } from "../types";
 import {
   Warehouse, Plus, Search, Edit3, Trash2, Save, ArrowLeft,
-  Layers, ChevronRight, Hash, ShieldAlert
+  Layers, ChevronRight, Hash, ShieldAlert, Sparkles, Download
 } from "lucide-react";
 import SecurityModal from "./SecurityModal";
+import { initialAppData } from "../data/mockDefaults";
 
 interface InventoryPanelProps {
   inventory: InventoryItem[];
@@ -27,6 +28,54 @@ export default function InventoryPanel({
   const [filterCategory, setFilterCategory] = useState<string>("All");
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Download Excel CSV format catalog
+  const downloadExcelCSV = () => {
+    // CSV Header row
+    const headers = [
+      "Product / Brand Name",
+      "Storage Category",
+      "Pieces per Inner Bag",
+      "Inners per Case",
+      "Total Pieces per Case",
+      "Lid / Special Info",
+      "Last Updated",
+      "Updated By"
+    ];
+
+    // CSV rows map
+    const rows = inventory.map(item => [
+      item.name,
+      item.category,
+      item.pcsPerInner,
+      item.innersPerCase,
+      item.pcsPerInner * item.innersPerCase,
+      item.lidInfo || "N/A",
+      item.lastUpdated,
+      item.updatedBy || "System"
+    ]);
+
+    // Build the string with full escaping support for Excel compatibility
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => 
+        row.map(value => {
+          const stringified = String(value).replace(/"/g, '""'); // Escape inner quotes
+          return `"${stringified}"`; // Wrap in quotes
+        }).join(",")
+      )
+    ].join("\n");
+
+    // Create a client blob download
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" }); // include UTF-8 BOM so Excel opens it with correct encoding!
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `mcd_conversion_specifications_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Editor states
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -36,6 +85,7 @@ export default function InventoryPanel({
   // Conversions only
   const [editPcsPerInner, setEditPcsPerInner] = useState<number>(40);
   const [editInnersPerCase, setEditInnersPerCase] = useState<number>(8);
+  const [editLidInfo, setEditLidInfo] = useState<string>("N/A");
 
   // Security Modal States
   const [securityModalOpen, setSecurityModalOpen] = useState(false);
@@ -73,6 +123,7 @@ export default function InventoryPanel({
     setEditCategory(item.category);
     setEditPcsPerInner(item.pcsPerInner || 1);
     setEditInnersPerCase(item.innersPerCase || 1);
+    setEditLidInfo(item.lidInfo || "N/A");
     setIsEditing(true);
   };
 
@@ -82,6 +133,7 @@ export default function InventoryPanel({
     setEditCategory(InventoryCategory.FREEZER);
     setEditPcsPerInner(40);
     setEditInnersPerCase(8);
+    setEditLidInfo("N/A");
     setIsEditing(true);
   };
 
@@ -108,6 +160,7 @@ export default function InventoryPanel({
                 category: editCategory,
                 pcsPerInner,
                 innersPerCase,
+                lidInfo: editLidInfo.trim() || "N/A",
                 // Keep stock levels as zero for simple conversion info style
                 cases: 0,
                 inners: 0,
@@ -125,6 +178,7 @@ export default function InventoryPanel({
           category: editCategory,
           pcsPerInner,
           innersPerCase,
+          lidInfo: editLidInfo.trim() || "N/A",
           cases: 0,
           inners: 0,
           pcs: 0,
@@ -185,14 +239,24 @@ export default function InventoryPanel({
         </div>
 
         {!isEditing && (
-          <button
-            onClick={handleAddNew}
-            id="add-inventory-btn"
-            className="flex items-center gap-1.5 bg-[#FFC72C] hover:bg-[#FFD454] text-[#8B6E00] font-extrabold px-3 py-1.5 rounded-lg text-xs select-none transition-colors cursor-pointer border border-transparent shadow-3xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add New Item Spec
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={downloadExcelCSV}
+              id="download-inventory-excel-btn"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs select-none transition-colors cursor-pointer border border-transparent shadow-3xs"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Excel Spec Catalog
+            </button>
+            <button
+              onClick={handleAddNew}
+              id="add-inventory-btn"
+              className="flex items-center gap-1.5 bg-[#FFC72C] hover:bg-[#FFD454] text-[#8B6E00] font-extrabold px-3 py-1.5 rounded-lg text-xs select-none transition-colors cursor-pointer border border-transparent shadow-3xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add New Item Spec
+            </button>
+          </div>
         )}
       </div>
 
@@ -253,6 +317,20 @@ export default function InventoryPanel({
                     <option value={InventoryCategory.DRINKS_SYRUPS}>{InventoryCategory.DRINKS_SYRUPS}</option>
                     <option value={InventoryCategory.OTHER}>{InventoryCategory.OTHER}</option>
                   </select>
+                </div>
+
+                <div>
+                  <label htmlFor="edit-inventory-lid" className="block text-xs font-bold text-slate-500 mb-1">
+                    Lid / Accessory Info
+                  </label>
+                  <input
+                    type="text"
+                    id="edit-inventory-lid"
+                    value={editLidInfo}
+                    onChange={(e) => setEditLidInfo(e.target.value)}
+                    placeholder="e.g. 135 pcs, or N/A"
+                    className="w-full bg-slate-50 border border-slate-250/80 rounded-lg px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-[4px] focus:outline-[#FFC72C] focus:bg-white transition-all font-sans"
+                  />
                 </div>
               </div>
 
@@ -411,10 +489,33 @@ export default function InventoryPanel({
           </div>
 
           {/* Specs Sheet Presentation */}
-          {filteredItems.length === 0 ? (
+          {inventory.length === 0 ? (
+            <div className="p-10 text-center rounded-2xl border border-dashed border-slate-300 bg-white space-y-4 shadow-3xs max-w-lg mx-auto" id="empty-inventory-seeder">
+              <div className="w-12 h-12 bg-amber-50 border border-amber-200 rounded-full flex items-center justify-center mx-auto text-[#DA291C]">
+                <Warehouse className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-800">No Product Specifications Found</h3>
+                <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                  Your store database does not currently have any packaging conversion or product items registered. Would you like to seed the standard McDonald's product catalog containing 54 brand specifications?
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (confirm("Confirm DB Seed: This will write 54 standard McDonald's product conversion specifications to your active database. Continue?")) {
+                    onSave(initialAppData.inventory);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 bg-[#FFC72C] hover:bg-[#FFD454] text-[#8B6E00] font-extrabold px-6 py-2.5 rounded-xl text-xs select-none transition-colors cursor-pointer border border-[#FFC72C]/30 shadow-xs"
+              >
+                <Sparkles className="w-4 h-4 text-[#DA291C]" />
+                Seed Standard McDonald's Catalog (54 Items)
+              </button>
+            </div>
+          ) : filteredItems.length === 0 ? (
             <div className="p-8 text-center rounded-xl border border-slate-200 bg-white space-y-1.5 shadow-3xs">
               <Warehouse className="w-8 h-8 text-slate-300 mx-auto" />
-              <p className="text-xs font-bold text-slate-505">No conversion specs match your selector criteria.</p>
+              <p className="text-xs font-bold text-slate-600">No conversion specs match your selector criteria.</p>
               <button
                 onClick={() => {
                   setFilterCategory("All");
@@ -430,9 +531,10 @@ export default function InventoryPanel({
               
               {/* TABLE HEADER (Desktop layout) */}
               <div className="hidden md:grid grid-cols-12 gap-4 bg-slate-50 px-4 py-2.5 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest border-b border-slate-150">
-                <div className="col-span-5">Product Name &amp; Category</div>
-                <div className="col-span-3 text-center">1 Inner Details</div>
+                <div className="col-span-4">Product Name &amp; Category</div>
+                <div className="col-span-2 text-center">1 Inner Details</div>
                 <div className="col-span-3 text-center">Case Details</div>
+                <div className="col-span-2 text-center">Lid / Accessory Info</div>
                 <div className="col-span-1 text-right">Actions</div>
               </div>
 
@@ -450,7 +552,7 @@ export default function InventoryPanel({
                       id={`inv-spec-row-${item.id}`}
                     >
                       {/* Name / Category Column */}
-                      <div className="col-span-1 md:col-span-5 flex flex-col sm:flex-row sm:items-center justify-between md:justify-start gap-1.5">
+                      <div className="col-span-1 md:col-span-4 flex flex-col sm:flex-row sm:items-center justify-between md:justify-start gap-1.5">
                         <div>
                           <h3 className="text-xs font-bold text-slate-800 font-sans tracking-tight leading-snug">
                             {item.name}
@@ -462,12 +564,12 @@ export default function InventoryPanel({
                       </div>
 
                       {/* Inner Sleeve Details */}
-                      <div className="col-span-1 md:col-span-3 flex items-center justify-between md:justify-center border-t border-slate-100 md:border-t-0 pt-2 md:pt-0">
+                      <div className="col-span-1 md:col-span-2 flex items-center justify-between md:justify-center border-t border-slate-100 md:border-t-0 pt-2 md:pt-0">
                         <span className="text-[9px] font-bold text-slate-400 uppercase md:hidden">1 Inner :</span>
                         {isBulk ? (
                           <span className="text-xs font-mono text-slate-400 uppercase font-semibold">N/A</span>
                         ) : (
-                          <div className="text-xs font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg text-center min-w-[90px]">
+                          <div className="text-xs font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 sm:px-2.5 py-1 rounded-lg text-center min-w-[80px]">
                             {pcs} Pcs
                           </div>
                         )}
@@ -477,17 +579,25 @@ export default function InventoryPanel({
                       <div className="col-span-1 md:col-span-3 flex items-center justify-between md:justify-center pt-1 md:pt-0">
                         <span className="text-[9px] font-bold text-slate-400 uppercase md:hidden">Case Details :</span>
                         {isBulk ? (
-                          <div className="text-xs font-mono font-bold text-[#DA291C] bg-[#DA291C]/5 border border-[#DA291C]/15 px-2.5 py-1 rounded-lg text-center min-w-[130px]">
+                          <div className="text-xs font-mono font-bold text-[#DA291C] bg-[#DA291C]/5 border border-[#DA291C]/15 px-2.5 py-1 rounded-lg text-center min-w-[120px]">
                             1 case = {pcs} pcs
                           </div>
                         ) : (
-                          <div className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-center min-w-[130px] flex flex-col items-center">
+                          <div className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-center min-w-[120px] flex flex-col items-center">
                             <span>1 case ({inners} inner)</span>
                             <span className="text-[8px] text-emerald-600 block leading-tight font-sans mt-0.5 uppercase tracking-tight">
                               Total: {inners * pcs} pcs
                             </span>
                           </div>
                         )}
+                      </div>
+
+                      {/* Lid / Accessory Info Details */}
+                      <div className="col-span-1 md:col-span-2 flex items-center justify-between md:justify-center pt-1 md:pt-0">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase md:hidden">Lid Info :</span>
+                        <div className="text-xs font-mono font-bold text-amber-800 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-lg text-center min-w-[100px] truncate" title={item.lidInfo || "N/A"}>
+                          {item.lidInfo || "N/A"}
+                        </div>
                       </div>
 
                       {/* Edit actions button */}

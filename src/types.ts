@@ -18,6 +18,7 @@ export interface InventoryItem {
   // Conversion factors
   pcsPerInner: number;    // How many pieces are in 1 inner
   innersPerCase: number;  // How many inners are in 1 case
+  lidInfo?: string;       // Optional documentation/Lid info specs
   // Current stock
   cases: number;          // Full cases counted
   inners: number;         // Loose inners counted

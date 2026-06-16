@@ -7,7 +7,7 @@ import React, { useState, useRef } from "react";
 import { NewsFeedPost, NewsFeedComment, UserSession } from "../types";
 import {
   MessageSquare, ThumbsUp, Send, Image as ImageIcon, Trash2, Edit3,
-  X, CheckSquare, Sparkles, HelpCircle, Save, Megaphone
+  X, CheckSquare, Sparkles, HelpCircle, Save, Megaphone, ZoomIn, ZoomOut, RotateCcw
 } from "lucide-react";
 import SecurityModal from "./SecurityModal";
 
@@ -46,6 +46,55 @@ export default function NewsFeedPanel({
   const [securityModalMessage, setSecurityModalMessage] = useState("");
   const [securityModalRequirePin, setSecurityModalRequirePin] = useState(false);
   const [securityModalOnConfirm, setSecurityModalOnConfirm] = useState<(() => void) | null>(null);
+
+  // Full-screen Image viewer & zoom states
+  const [fullscreenImage, setFullscreenImage] = useState<{ src: string; caption?: string } | null>(null);
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [zoomPosition, setZoomPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Zoom / pan handlers for full-screen viewer
+  const handleWheel = (e: React.WheelEvent) => {
+    const zoomFactor = 0.15;
+    let nextScale = zoomScale + (e.deltaY < 0 ? zoomFactor : -zoomFactor);
+    nextScale = Math.min(Math.max(nextScale, 0.5), 10); // scale bounds: 50% to 1000%
+    setZoomScale(nextScale);
+    if (nextScale === 1) {
+      setZoomPosition({ x: 0, y: 0 });
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - zoomPosition.x, y: e.clientY - zoomPosition.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setZoomPosition({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleZoomIn = () => {
+    setZoomScale(prev => Math.min(prev + 0.25, 10));
+  };
+
+  const handleZoomOut = () => {
+    setZoomScale(prev => {
+      const next = Math.max(prev - 0.25, 0.5);
+      if (next === 1) setZoomPosition({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleResetZoom = () => {
+    setZoomScale(1);
+    setZoomPosition({ x: 0, y: 0 });
+  };
 
   const requestConfirmation = (
     title: string,
@@ -92,12 +141,46 @@ export default function NewsFeedPanel({
 
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64 = reader.result as string;
-      if (isEdit) {
-        setEditPostImage(base64);
-      } else {
-        setNewPostImage(base64);
-      }
+      const rawBase64 = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200; // 1200px is excellent for high quality and small size
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          // Compress to JPEG with 0.82 quality which gives incredible clarity at sub-200kB sizes
+          const compressedBase64 = canvas.toDataURL("image/jpeg", 0.82);
+          if (isEdit) {
+            setEditPostImage(compressedBase64);
+          } else {
+            setNewPostImage(compressedBase64);
+          }
+        } else {
+          // Fallback if canvas is not supported
+          if (isEdit) {
+            setEditPostImage(rawBase64);
+          } else {
+            setNewPostImage(rawBase64);
+          }
+        }
+      };
+      img.src = rawBase64;
     };
     reader.readAsDataURL(file);
   };
@@ -489,7 +572,12 @@ export default function NewsFeedPanel({
                           <img
                             src={post.image}
                             alt={post.imageName || "Feed Graphic"}
-                            className="max-h-[350px] w-auto object-contain rounded-lg hover:scale-[1.002] transition-transform duration-150"
+                            onClick={() => {
+                              setFullscreenImage({ src: post.image, caption: post.imageName });
+                              setZoomScale(1);
+                              setZoomPosition({ x: 0, y: 0 });
+                            }}
+                            className="max-h-[350px] w-auto object-contain rounded-lg cursor-zoom-in hover:brightness-95 transition-all duration-150"
                             referrerPolicy="no-referrer"
                           />
                         </div>
@@ -622,6 +710,108 @@ export default function NewsFeedPanel({
         onConfirm={securityModalOnConfirm || (() => {})}
         onCancel={() => setSecurityModalOpen(false)}
       />
+
+      {/* Full-screen Zoomable Image Viewer Modal */}
+      {fullscreenImage && (
+        <div 
+          className="fixed inset-0 z-55 flex flex-col justify-between bg-slate-950/98 text-white select-none transition-all font-sans"
+          onWheel={handleWheel}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 bg-slate-900 border-b border-slate-800/80">
+            <div className="flex flex-col">
+              <span className="text-[9px] uppercase tracking-widest font-mono text-[#FFC72C] font-bold">
+                Live Operations Photo Viewer
+              </span>
+              <h3 className="text-xs font-bold text-slate-200 truncate max-w-[200px] sm:max-w-md">
+                {fullscreenImage.caption || "Feed Photo Spec sheet"}
+              </h3>
+            </div>
+            
+            <div className="flex items-center gap-2.5">
+              <span className="text-[10px] bg-slate-800 text-slate-300 font-mono px-2 py-1 rounded border border-slate-700 font-bold">
+                ZOOM: {Math.round(zoomScale * 100)}%
+              </span>
+              <button
+                onClick={() => setFullscreenImage(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white p-2 rounded-lg transition-colors cursor-pointer"
+                title="Close and exit viewer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Zoomable Viewport */}
+          <div 
+            className="flex-1 w-full overflow-hidden flex items-center justify-center relative bg-slate-950/50 cursor-zoom-in active:cursor-grabbing"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+            onDoubleClick={() => {
+              if (zoomScale !== 1) {
+                handleResetZoom();
+              } else {
+                setZoomScale(2.5);
+              }
+            }}
+          >
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center text-[9px] text-slate-700 font-mono uppercase tracking-widest leading-none z-0 select-none">
+              Drag to Pan / Mouse Wheel or Double Click to Zoom
+            </div>
+            
+            <img
+              src={fullscreenImage.src}
+              alt={fullscreenImage.caption || "Zoomed Specs"}
+              style={{
+                transform: `translate(${zoomPosition.x}px, ${zoomPosition.y}px) scale(${zoomScale})`,
+                transformOrigin: "center center",
+                transition: isDragging ? "none" : "transform 0.1s ease-out"
+              }}
+              className="max-w-[95%] max-h-[85vh] w-auto h-auto object-contain select-none shadow-2xl relative z-10 rounded-sm"
+              draggable="false"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+
+          {/* Controls Bar */}
+          <div className="w-full bg-slate-900 border-t border-slate-850/85 p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 z-10">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleZoomIn}
+                className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 hover:text-[#FFC72C] text-slate-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-slate-700"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+                <span>Zoom In</span>
+              </button>
+              
+              <button
+                onClick={handleZoomOut}
+                className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 hover:text-[#FFC72C] text-slate-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-slate-700"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+                <span>Zoom Out</span>
+              </button>
+
+              <button
+                onClick={handleResetZoom}
+                className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 hover:text-rose-400 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer border border-slate-700"
+                title="Reset Zoom"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
+            </div>
+
+            <div className="text-[10px] text-slate-400 max-w-xs text-center sm:text-right font-sans">
+              <span className="text-[#FFC72C] font-extrabold">💡 TIP:</span> Scroll mouse wheel or pinch to zoom. Left-click & drag when zoomed to pan around the image.
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

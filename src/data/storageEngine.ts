@@ -45,12 +45,10 @@ export function getStoredData(): AppSchema {
   }
   try {
     const parsed = JSON.parse(localData) as AppSchema;
-    // Smart Migration: If the user's browser has cached the old database format, migrate safely.
-    const holdsOldCatalog = parsed.inventory && parsed.inventory.some(item => item.id === "i_patties9");
-    if (holdsOldCatalog || !parsed.inventory) {
-      parsed.inventory = [];
-      saveToLocal(STORAGE_KEY, parsed);
-    }
+    if (!parsed.inventory) parsed.inventory = [];
+    if (!parsed.procedures) parsed.procedures = [];
+    if (!parsed.checklist) parsed.checklist = [];
+    if (!parsed.feed) parsed.feed = [];
     return parsed;
   } catch {
     return initialAppData;

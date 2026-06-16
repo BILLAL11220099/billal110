@@ -6,10 +6,12 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost } from "./types";
-import { getStoredData, saveStoredData } from "./data/storageEngine";
+import { getStoredData, saveStoredData, resetDatabaseToDefault } from "./data/storageEngine";
+import { collection, getDocs } from "firebase/firestore";
+import { db, auth } from "./data/firebase";
+import { signInAnonymously } from "firebase/auth";
 import {
   seedFirestoreIfNeeded,
-  subscribeToAppSchema,
   saveProcedureItemDoc,
   deleteProcedureItemDoc,
   saveInventoryItemDoc,
@@ -30,8 +32,93 @@ import BackupsPanel from "./components/BackupsPanel";
 
 import {
   BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
-  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad
+  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw
 } from "lucide-react";
+
+function parseCollections(
+  procDocs: any[],
+  invDocs: any[],
+  chkDocs: any[],
+  feedDocs: any[]
+): AppSchema {
+  const proceduresList: CompanyProcedure[] = [];
+  procDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data) {
+      proceduresList.push({
+        id: data.id || docSnap.id,
+        title: data.title || "Untitled Procedure",
+        category: data.category || "General",
+        content: data.content || "",
+        image: data.image || undefined,
+        lastUpdated: data.lastUpdated || new Date().toISOString(),
+        updatedBy: data.updatedBy || "System Sync"
+      });
+    }
+  });
+
+  const inventoryList: InventoryItem[] = [];
+  invDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data) {
+      inventoryList.push({
+        id: data.id || docSnap.id,
+        name: data.name || "Unnamed Item",
+        category: data.category || "Other",
+        pcsPerInner: typeof data.pcsPerInner === "number" ? data.pcsPerInner : (Number(data.pcsPerInner) || 1),
+        innersPerCase: typeof data.innersPerCase === "number" ? data.innersPerCase : (Number(data.innersPerCase) || 1),
+        lidInfo: data.lidInfo || undefined,
+        cases: typeof data.cases === "number" ? data.cases : (Number(data.cases) || 0),
+        inners: typeof data.inners === "number" ? data.inners : (Number(data.inners) || 0),
+        pcs: typeof data.pcs === "number" ? data.pcs : (Number(data.pcs) || 0),
+        lastUpdated: data.lastUpdated || new Date().toISOString(),
+        updatedBy: data.updatedBy || "System Sync"
+      });
+    }
+  });
+
+  const checklistList: ChecklistItem[] = [];
+  chkDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data) {
+      checklistList.push({
+        id: data.id || docSnap.id,
+        task: data.task || "",
+        category: data.category || "Opening",
+        completed: !!data.completed,
+        completedBy: data.completedBy || "",
+        timeCompleted: data.timeCompleted || ""
+      });
+    }
+  });
+
+  const feedList: NewsFeedPost[] = [];
+  feedDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data) {
+      feedList.push({
+        id: data.id || docSnap.id,
+        author: data.author || "Crew Member",
+        role: data.role || "Crew",
+        text: data.text || "",
+        image: data.image || undefined,
+        imageName: data.imageName || undefined,
+        likes: typeof data.likes === "number" ? data.likes : (Number(data.likes) || 0),
+        likedBy: Array.isArray(data.likedBy) ? data.likedBy : [],
+        comments: Array.isArray(data.comments) ? data.comments : [],
+        timestamp: data.timestamp || new Date().toISOString()
+      });
+    }
+  });
+  feedList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return {
+    procedures: proceduresList,
+    inventory: inventoryList,
+    checklist: checklistList,
+    feed: feedList
+  };
+}
 
 export default function App() {
   const [session, setSession] = useState<UserSession | null>(() => {
@@ -49,6 +136,19 @@ export default function App() {
   // Real-time Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Sync Indicator state
+  const [syncStatus, setSyncStatus] = useState<"connecting" | "connected" | "error">("connecting");
+
+  // Track initial sync status across collections before lifting the splash gate
+  const [initialSyncProgress, setInitialSyncProgress] = useState({
+    procedures: false,
+    inventory: false,
+    checklist: false,
+    feed: false
+  });
+
+  const [isForceSyncing, setIsForceSyncing] = useState(false);
+
   // Search-linked active structures (for opening editors directly)
   const [activeSelectedProcedure, setActiveSelectedProcedure] = useState<CompanyProcedure | null>(null);
   const [activeSelectedInventory, setActiveSelectedInventory] = useState<InventoryItem | null>(null);
@@ -60,28 +160,128 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Real-time Cloud Synchronization
+  // Safeguard Connection Timeout helper: if offline or lagging, bypass progress barrier after 3.5 seconds
   useEffect(() => {
-    let unsub: (() => void) | null = null;
-    
-    const initSync = async () => {
-      await seedFirestoreIfNeeded();
-      unsub = subscribeToAppSchema(
-        (updatedChunks) => {
-          setAppData((prev) => ({ ...prev, ...updatedChunks }));
-        },
-        (err) => {
-          console.error("Firebase sync error inside main view context:", err);
+    const syncTimeout = setTimeout(() => {
+      setInitialSyncProgress((prev) => {
+        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed) {
+          console.warn("Initial Cloud connection took longer than 3.5s. Falling back to local replication cache.");
+          return {
+            procedures: true,
+            inventory: true,
+            checklist: true,
+            feed: true
+          };
         }
-      );
-    };
+        return prev;
+      });
+    }, 3500);
 
-    initSync();
-
-    return () => {
-      if (unsub) unsub();
-    };
+    return () => clearTimeout(syncTimeout);
   }, []);
+
+  // One-time Cloud Synchronization at app startup (Live Sync removed)
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setSyncStatus("connecting");
+      try {
+        await signInAnonymously(auth);
+      } catch (authErr) {
+        console.warn("Anonymous registration was skipped or failed:", authErr);
+      }
+
+      try {
+        // Run seed check in background/sequentially
+        await seedFirestoreIfNeeded();
+      } catch (err) {
+        console.warn("Auto-seeding was skipped or encountered a transient issue:", err);
+      }
+
+      try {
+        const [procSnap, invSnap, chkSnap, feedSnap] = await Promise.all([
+          getDocs(collection(db, "procedures")),
+          getDocs(collection(db, "inventory")),
+          getDocs(collection(db, "checklist")),
+          getDocs(collection(db, "feed"))
+        ]);
+
+        const updated = parseCollections(
+          procSnap.docs,
+          invSnap.docs,
+          chkSnap.docs,
+          feedSnap.docs
+        );
+
+        setAppData(updated);
+        try {
+          localStorage.setItem("mcd_crew_app_database", JSON.stringify(updated));
+        } catch (e) {
+          console.error("Local storage error in startup fetch:", e);
+        }
+
+        setSyncStatus("connected");
+        setInitialSyncProgress({
+          procedures: true,
+          inventory: true,
+          checklist: true,
+          feed: true
+        });
+      } catch (err) {
+        console.error("Initial database load from cloud error:", err);
+        setSyncStatus("error");
+        setInitialSyncProgress({
+          procedures: true,
+          inventory: true,
+          checklist: true,
+          feed: true
+        });
+      }
+    };
+
+    loadInitialData();
+  }, []);
+
+  // Force Full Real-Time Re-synchronization callback
+  const forceSync = async () => {
+    if (isForceSyncing) return;
+    setIsForceSyncing(true);
+    setSyncStatus("connecting");
+    try {
+      const [procSnap, invSnap, chkSnap, feedSnap] = await Promise.all([
+        getDocs(collection(db, "procedures")),
+        getDocs(collection(db, "inventory")),
+        getDocs(collection(db, "checklist")),
+        getDocs(collection(db, "feed"))
+      ]);
+
+      const updated = parseCollections(
+        procSnap.docs,
+        invSnap.docs,
+        chkSnap.docs,
+        feedSnap.docs
+      );
+
+      setAppData(updated);
+      try {
+        localStorage.setItem("mcd_crew_app_database", JSON.stringify(updated));
+      } catch (e) {
+        console.error("Local storage error in force sync:", e);
+      }
+
+      setSyncStatus("connected");
+      setInitialSyncProgress({
+        procedures: true,
+        inventory: true,
+        checklist: true,
+        feed: true
+      });
+    } catch (err) {
+      console.error("Force sync from cloud error:", err);
+      setSyncStatus("error");
+    } finally {
+      setIsForceSyncing(false);
+    }
+  };
 
   // Sync session cache
   const handleLoginSuccess = (newSession: UserSession) => {
@@ -221,6 +421,84 @@ export default function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const initialSyncComplete =
+    initialSyncProgress.procedures &&
+    initialSyncProgress.inventory &&
+    initialSyncProgress.checklist &&
+    initialSyncProgress.feed;
+
+  // If logged in, but initial cloud sync is pending, show high-end operations loading gate
+  if (!initialSyncComplete) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+        {/* Golden glow arch background */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-[#FFC72C]/10 rounded-full blur-[100px] pointer-events-none" />
+        
+        <div className="w-full max-w-sm text-center z-10 space-y-6">
+          {/* Logo element */}
+          <div className="relative inline-flex mb-2">
+            <div className="w-16 h-16 bg-[#FFC72C] rounded-2xl flex items-center justify-center font-black text-3xl text-[#DA291C] shadow-lg animate-pulse">
+              <span>M</span>
+            </div>
+            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full border-2 border-slate-950 flex items-center justify-center">
+              <RefreshCw className="w-3 h-3 text-white animate-spin" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <h1 className="text-xl font-extrabold tracking-tight">Syncing Store #4029</h1>
+            <p className="text-[10px] text-slate-400 font-mono uppercase tracking-widest font-bold">
+              Connecting to Live Operations Database...
+            </p>
+          </div>
+
+          {/* Sync checklist */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4.5 text-left space-y-2.5 font-sans">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="text-slate-400 font-medium font-sans">Procedures Catalog</span>
+              {initialSyncProgress.procedures ? (
+                <span className="text-[#FFC72C] font-mono leading-none font-bold">✓ SYNCED</span>
+              ) : (
+                <span className="text-slate-500 text-[10px] uppercase font-bold animate-pulse font-mono">Syncing...</span>
+              )}
+            </div>
+            <div className="border-t border-slate-800/60 font-sans"></div>
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="text-slate-400 font-medium font-sans">Spec Inventory multiplier specs</span>
+              {initialSyncProgress.inventory ? (
+                <span className="text-[#FFC72C] font-mono leading-none font-bold">✓ SYNCED</span>
+              ) : (
+                <span className="text-slate-500 text-[10px] uppercase font-bold animate-pulse font-mono">Syncing...</span>
+              )}
+            </div>
+            <div className="border-t border-slate-800/60 font-sans"></div>
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="text-slate-400 font-medium font-sans">Daily checklists roster</span>
+              {initialSyncProgress.checklist ? (
+                <span className="text-[#FFC72C] font-mono leading-none font-bold">✓ SYNCED</span>
+              ) : (
+                <span className="text-slate-500 text-[10px] uppercase font-bold animate-pulse font-mono">Syncing...</span>
+              )}
+            </div>
+            <div className="border-t border-slate-800/60 font-sans font-medium"></div>
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="text-slate-400 font-medium font-sans">Team news feed notices</span>
+              {initialSyncProgress.feed ? (
+                <span className="text-[#FFC72C] font-[#FFC72C] font-mono leading-none font-bold">✓ SYNCED</span>
+              ) : (
+                <span className="text-slate-500 text-[10px] uppercase font-bold animate-pulse font-mono">Syncing...</span>
+              )}
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-500 leading-normal font-medium max-w-xs mx-auto font-sans">
+            Authorized crew console session for <strong className="text-slate-300 font-bold">{session.username}</strong> ({session.role}). Loading assets...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F4F4F5] text-slate-900 flex flex-col font-sans selection:bg-[#FFC72C] selection:text-slate-950">
       
@@ -246,6 +524,33 @@ export default function App() {
 
           {/* Right side Metadata: Profile badge & Shift Clock */}
           <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+            {/* Live syncing status badge & Force-Sync Trigger */}
+            <button
+              onClick={forceSync}
+              disabled={isForceSyncing}
+              className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] font-sans px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer hover:brightness-95 active:scale-95 disabled:opacity-75 disabled:cursor-not-allowed ${
+                syncStatus === "connected"
+                  ? "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100"
+                  : syncStatus === "error"
+                  ? "text-[#DA291C] bg-rose-50 border-rose-200 animate-pulse hover:bg-rose-100"
+                  : "text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100"
+              }`}
+              title={
+                isForceSyncing
+                  ? "Completing full cloud database re-sync..."
+                  : syncStatus === "connected" 
+                  ? "Database synced on mount. Click to fetch updates manually!" 
+                  : syncStatus === "error" 
+                  ? "Connection error. Click to retry sync..." 
+                  : "Connecting. Click to fetch cloud data!"
+              }
+            >
+              <RefreshCw className={`w-3 h-3 ${isForceSyncing ? "animate-spin text-amber-500" : syncStatus === "connected" ? "text-emerald-500" : syncStatus === "error" ? "text-rose-500 animate-spin" : "text-amber-500 animate-pulse"}`} />
+              <span className="hidden sm:inline font-bold">
+                {isForceSyncing ? "Syncing..." : syncStatus === "connected" ? "Synced" : syncStatus === "error" ? "Offline/Err" : "Connecting"}
+              </span>
+            </button>
+
             {/* Real-time UTC or Local clock */}
             <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
               <Clock className="w-3.5 h-3.5 text-[#DA291C]" />
@@ -279,6 +584,37 @@ export default function App() {
 
         </div>
       </header>
+
+      {/* EMERGENCY DATABASE SEED BANNER FOR HELPING USERS WITH EMPTY DATABASES */}
+      {(appData.inventory.length === 0 || appData.procedures.length === 0) && (
+        <div className="bg-amber-50 border-b border-amber-200 py-3 px-4 shadow-3xs" id="empty-db-setup-banner">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-3">
+              <Sparkles className="w-5 h-5 text-[#DA291C] shrink-0 mt-0.5 sm:mt-0 animate-pulse" />
+              <div>
+                <p className="text-xs font-bold text-slate-850">
+                  First-Time Cloud Database Setup Required
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Your store database is currently active but holds no procedures or inventory multiplier specs. Seed the default McDonald's catalog profiles to populate specs instantly!
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                if (confirm("🚨 Seed Cloud Catalog: This will write the standard McDonald's operations specifications, task checklists, and kitchen procedures onto your live cloud database. Proceed?")) {
+                  const defaults = resetDatabaseToDefault();
+                  handleBackupRestore(defaults);
+                }
+              }}
+              className="bg-[#DA291C] hover:bg-[#C21B10] text-white font-extrabold px-4.5 py-1.5 rounded-lg text-xs select-none shadow-sm transition-all shrink-0 cursor-pointer text-center"
+              id="empty-db-seed-btn"
+            >
+              Seed McDonald's Spec Sheet
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 2. TAB SELECTION RIBBON */}
       <div className="bg-white border-b border-slate-200 sticky top-14 z-30" id="tabs-ribbon-bar">
