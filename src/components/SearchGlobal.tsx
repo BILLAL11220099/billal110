@@ -175,6 +175,16 @@ export default function SearchGlobal({ appData, onSelectItem }: SearchGlobalProp
                       </p>
                       <p className="text-[11px] text-slate-600 font-sans truncate leading-normal" dangerouslySetInnerHTML={{ __html: res.snippet }} />
                     </div>
+                    {res.originalObject?.image && (
+                      <div className="shrink-0 w-11 h-11 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-50 self-center">
+                        <img 
+                          src={res.originalObject.image} 
+                          alt="Attachment" 
+                          className="w-full h-full object-cover select-none pointer-events-none"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
                     <div className="text-slate-300 group-hover:text-[#DA291C] self-center pl-1">
                       <Edit3 className="w-3.5 h-3.5" />
                     </div>

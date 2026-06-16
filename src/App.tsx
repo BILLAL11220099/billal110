@@ -153,6 +153,7 @@ export default function App() {
   const [activeSelectedProcedure, setActiveSelectedProcedure] = useState<CompanyProcedure | null>(null);
   const [activeSelectedInventory, setActiveSelectedInventory] = useState<InventoryItem | null>(null);
   const [activeSelectedChecklist, setActiveSelectedChecklist] = useState<ChecklistItem | null>(null);
+  const [activeSelectedFeedPost, setActiveSelectedFeedPost] = useState<NewsFeedPost | null>(null);
 
   // Update Clock every second
   useEffect(() => {
@@ -395,6 +396,7 @@ export default function App() {
     setActiveSelectedProcedure(null);
     setActiveSelectedInventory(null);
     setActiveSelectedChecklist(null);
+    setActiveSelectedFeedPost(null);
 
     switch (type) {
       case "procedure":
@@ -411,7 +413,7 @@ export default function App() {
         break;
       case "feed":
         setActiveTab("feed");
-        // Simply scrolls to the top or focuses feed
+        setActiveSelectedFeedPost(originalObject as NewsFeedPost);
         break;
     }
   };
@@ -751,6 +753,7 @@ export default function App() {
                 feed={appData.feed}
                 currentSession={session}
                 onSave={saveFeed}
+                activeSelectedFeedPost={activeSelectedFeedPost}
               />
             )}
 

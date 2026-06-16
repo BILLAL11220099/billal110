@@ -7,7 +7,8 @@ import React, { useState, useRef } from "react";
 import { NewsFeedPost, NewsFeedComment, UserSession } from "../types";
 import {
   MessageSquare, ThumbsUp, Send, Image as ImageIcon, Trash2, Edit3,
-  X, CheckSquare, Sparkles, HelpCircle, Save, Megaphone, ZoomIn, ZoomOut, RotateCcw
+  X, CheckSquare, Sparkles, HelpCircle, Save, Megaphone, ZoomIn, ZoomOut, RotateCcw,
+  Search, User, FileText
 } from "lucide-react";
 import SecurityModal from "./SecurityModal";
 
@@ -15,14 +16,37 @@ interface NewsFeedPanelProps {
   feed: NewsFeedPost[];
   currentSession: UserSession;
   onSave: (feedList: NewsFeedPost[]) => void;
+  activeSelectedFeedPost?: NewsFeedPost | null;
 }
 
 export default function NewsFeedPanel({
   feed,
   currentSession,
-  onSave
+  onSave,
+  activeSelectedFeedPost
 }: NewsFeedPanelProps) {
-  // Input states
+  // Listen for search-linked selected feed post
+  React.useEffect(() => {
+    if (activeSelectedFeedPost) {
+      setSearchInputValue("");
+      setCommittedQuery("");
+      setTimeout(() => {
+        const element = document.getElementById(`feed-card-${activeSelectedFeedPost.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          element.classList.add("ring-4", "ring-[#FFC72C]", "ring-offset-2", "transition-all", "duration-500");
+          setTimeout(() => {
+            element.classList.remove("ring-4", "ring-[#FFC72C]", "ring-offset-2");
+          }, 3000);
+        }
+      }, 100);
+    }
+  }, [activeSelectedFeedPost]);
+
+  // Input & Advanced suggestions states
+  const [searchInputValue, setSearchInputValue] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [newPostText, setNewPostText] = useState("");
   const [newPostImage, setNewPostImage] = useState<string | undefined>(undefined);
   const [newPostImageName, setNewPostImageName] = useState("");
@@ -300,6 +324,123 @@ export default function NewsFeedPanel({
     }
   };
 
+  // Generate high-quality recommendations/suggestions based on typed input
+  const getSuggestions = () => {
+    const q = searchInputValue.trim().toLowerCase();
+    if (!q) return [];
+
+    const suggestions: { label: string; value: string; snippet?: string; category: "author" | "text" | "photo" | "comment" }[] = [];
+    const addedValues = new Set<string>();
+
+    // 1. Match Authors
+    const authors = Array.from(new Set(feed.map(p => p.author)));
+    authors.forEach(author => {
+      if (author.toLowerCase().includes(q)) {
+        const key = `author:${author.toLowerCase()}`;
+        if (!addedValues.has(key)) {
+          addedValues.add(key);
+          suggestions.push({
+            label: author,
+            value: author,
+            snippet: "Author in feed updates",
+            category: "author"
+          });
+        }
+      }
+    });
+
+    // 2. Match Photo Names
+    feed.forEach(p => {
+      if (p.imageName && p.imageName.toLowerCase().includes(q)) {
+        const key = `photo:${p.imageName.toLowerCase()}`;
+        if (!addedValues.has(key)) {
+          addedValues.add(key);
+          suggestions.push({
+            label: p.imageName,
+            value: p.imageName,
+            snippet: "Attached file / photo",
+            category: "photo"
+          });
+        }
+      }
+    });
+
+    // 3. Match comments
+    feed.forEach(p => {
+      p.comments?.forEach(c => {
+        if (c.text.toLowerCase().includes(q)) {
+          const value = c.text.length > 45 ? c.text.slice(0, 45) + "..." : c.text;
+          const key = `comment:${value.toLowerCase()}`;
+          if (!addedValues.has(key)) {
+            addedValues.add(key);
+            suggestions.push({
+              label: value,
+              value: c.text,
+              snippet: `Comment by ${c.author}`,
+              category: "comment"
+            });
+          }
+        }
+      });
+    });
+
+    // 4. Match key phrases or words in feed post text
+    feed.forEach(p => {
+      if (p.text.toLowerCase().includes(q)) {
+        const words = p.text.split(/\s+/);
+        const matchWord = words.find(w => {
+          const cleaned = w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").toLowerCase();
+          return cleaned.startsWith(q) && cleaned.length >= q.length;
+        });
+        
+        if (matchWord) {
+          const cleanedWord = matchWord.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+          const key = `word:${cleanedWord.toLowerCase()}`;
+          if (!addedValues.has(key) && cleanedWord.length > 2) {
+            addedValues.add(key);
+            suggestions.push({
+              label: cleanedWord,
+              value: cleanedWord,
+              snippet: `Matches keyword in post`,
+              category: "text"
+            });
+          }
+        }
+
+        const fullPostVal = p.text.length > 45 ? p.text.slice(0, 45) + "..." : p.text;
+        const keyFull = `post:${fullPostVal.toLowerCase()}`;
+        if (!addedValues.has(keyFull)) {
+          addedValues.add(keyFull);
+          suggestions.push({
+            label: fullPostVal,
+            value: p.text,
+            snippet: `Excerpt from ${p.author}'s post`,
+            category: "text"
+          });
+        }
+      }
+    });
+
+    return suggestions.slice(0, 6);
+  };
+
+  const activeSuggestions = getSuggestions();
+
+  const filteredFeed = feed.filter((post) => {
+    if (!committedQuery.trim()) return true;
+    const q = committedQuery.trim().toLowerCase();
+    const textMatch = post.text.toLowerCase().includes(q);
+    const authorMatch = post.author.toLowerCase().includes(q);
+    const roleMatch = post.role.toLowerCase().includes(q);
+    const imageNameMatch = post.imageName?.toLowerCase().includes(q) || false;
+    const commentsMatch = post.comments?.some(cmt => 
+      cmt.text.toLowerCase().includes(q) || 
+      cmt.author.toLowerCase().includes(q) || 
+      cmt.role.toLowerCase().includes(q)
+    ) || false;
+    return textMatch || authorMatch || roleMatch || imageNameMatch || commentsMatch;
+  });
+
   return (
     <div className="max-w-2xl mx-auto space-y-4 font-sans">
       
@@ -316,106 +457,333 @@ export default function NewsFeedPanel({
         </div>
       </div>
 
-      {/* CREATE POST CARD - FACEBOOK BOX STYLE */}
-      <form onSubmit={handleCreatePost} className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-3 shadow-2xs">
-        <div className="flex items-start gap-2.5">
-          {/* Avatar */}
-          <div className={`w-8.5 h-8.5 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0 border ${getAvatarColors(currentSession.role)}`}>
-            {currentSession.username.slice(0, 2).toUpperCase()}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            {/* Input */}
-            <textarea
-              id="newsfeed-post-text-input"
-              value={newPostText}
-              onChange={(e) => setNewPostText(e.target.value)}
-              rows={2}
-              placeholder={`What is on your mind, ${currentSession.username.split(" ")[0]}? Post shift updates...`}
-              className="w-full bg-transparent border-0 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:ring-0 resize-none font-sans leading-relaxed"
-            />
-          </div>
+      {/* DEDICATED NEWS FEED ONLY SEARCH BAR */}
+      <div id="news-feed-local-search-container" className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2 relative">
+        <div className="flex items-center justify-between">
+          <label htmlFor="feed-local-search" className="text-xs font-bold text-slate-700 flex items-center gap-1.5 select-none">
+            <Search className="w-3.5 h-3.5 text-slate-500" />
+            Search In News Feed Only
+          </label>
+          {committedQuery.trim() && (
+            <span className="text-[10px] font-mono bg-[#DA291C]/10 text-[#DA291C] px-2 py-0.5 rounded-full font-bold">
+              Active Filter: {filteredFeed.length} {filteredFeed.length === 1 ? 'result' : 'results'}
+            </span>
+          )}
         </div>
-
-        {/* Thumbnail preview if direct photo loaded */}
-        {newPostImage && (
-          <div className="space-y-2.5 pt-1">
-            <div className="relative rounded-xl border border-slate-200 bg-slate-50 p-1.5 inline-block group">
-              <img
-                src={newPostImage}
-                alt="Base64 Upload Preview"
-                className="max-h-48 rounded-lg w-auto object-contain"
-                referrerPolicy="no-referrer"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setNewPostImage(undefined);
-                  setNewPostImageName("");
-                }}
-                className="absolute top-2.5 right-2.5 bg-slate-900/80 hover:bg-slate-805 rounded-full p-1 text-white border border-transparent cursor-pointer"
-                id="clear-post-image-btn"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-              <label htmlFor="new-post-image-name" className="block text-[10px] font-bold text-[#DA291C] uppercase tracking-wider mb-1">
-                Name of the Photo (Printed on Feed Graphic)
-              </label>
+        
+        <div className="relative">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
               <input
+                id="feed-local-search"
                 type="text"
-                required
-                id="new-post-image-name"
-                value={newPostImageName}
-                onChange={(e) => setNewPostImageName(e.target.value)}
-                placeholder="Type the exact name/label as you see in the photo..."
-                className="w-full bg-white border border-slate-250/90 rounded-lg px-2.5 py-1.5 text-xs text-slate-850 placeholder-slate-400 focus:outline-none focus:border-[#DA291C]"
+                value={searchInputValue}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    setCommittedQuery(searchInputValue);
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                onChange={(e) => {
+                  setSearchInputValue(e.target.value);
+                  if (!e.target.value) {
+                    setCommittedQuery("");
+                  }
+                }}
+                placeholder="Type keywords and hit Enter to search (e.g. author name, comments, checklist)..."
+                className="w-full bg-white border border-slate-200 text-slate-850 text-xs rounded-xl pl-9 pr-8 py-2.5 outline-none focus:ring-2 focus:ring-[#FFC72C]/30 focus:border-[#FFC72C] transition-all hover:border-slate-300"
+              />
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 select-none">
+                <Search className="w-3.5 h-3.5" />
+              </div>
+              {searchInputValue && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchInputValue("");
+                    setCommittedQuery("");
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCommittedQuery(searchInputValue);
+              }}
+              className="px-4 py-2.5 text-xs font-bold text-white bg-[#DA291C] hover:bg-[#b5220c] rounded-xl hover:shadow-xs active:scale-95 transition-all outline-none"
+            >
+              Search
+            </button>
+          </div>
+        </div>
+
+        {/* FEEDBACK HELPER LINE */}
+        {committedQuery.trim() ? (
+          <div className="text-[10.5px] text-slate-500 flex items-center justify-between bg-white border border-slate-100 rounded-xl px-3 py-2 mt-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="truncate">
+                Showing posts matching: <strong className="text-slate-800">"{committedQuery}"</strong>
+              </span>
+            </div>
+            <button 
+              type="button"
+              onClick={() => {
+                setSearchInputValue("");
+                setCommittedQuery("");
+              }} 
+              className="text-[#DA291C] font-bold hover:underline cursor-pointer text-[10px] uppercase tracking-wider shrink-0"
+            >
+              Show All Updates
+            </button>
+          </div>
+        ) : (
+          searchInputValue.trim() && (
+            <div className="text-[10px] text-slate-400/90 font-medium italic pl-1 flex items-center gap-1 mt-1 select-none">
+              <Sparkles className="w-3 h-3 text-[#FFC72C]" />
+              Press <span className="font-bold font-mono bg-slate-200/50 text-slate-600 px-1 py-0.2 rounded">Enter</span> or click search to apply current filter words.
+            </div>
+          )
+        )}
+      </div>
+
+      {/* CREATE POST CARD - FACEBOOK BOX STYLE */}
+      {!committedQuery.trim() && (
+        <form onSubmit={handleCreatePost} className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-3 shadow-2xs">
+          <div className="flex items-start gap-2.5">
+            {/* Avatar */}
+            <div className={`w-8.5 h-8.5 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0 border ${getAvatarColors(currentSession.role)}`}>
+              {currentSession.username.slice(0, 2).toUpperCase()}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              {/* Input */}
+              <textarea
+                id="newsfeed-post-text-input"
+                value={newPostText}
+                onChange={(e) => setNewPostText(e.target.value)}
+                rows={2}
+                placeholder={`What is on your mind, ${currentSession.username.split(" ")[0]}? Post shift updates...`}
+                className="w-full bg-transparent border-0 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:ring-0 resize-none font-sans leading-relaxed"
               />
             </div>
           </div>
-        )}
 
-        <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-          {/* File Upload Selector Action */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 hover:bg-slate-50 px-2.5 py-1 rounded-lg text-xs font-bold text-slate-500 hover:text-[#DA291C] transition-colors cursor-pointer select-none border border-slate-201/20"
-            id="post-picture-upload-trigger"
-          >
-            <ImageIcon className="w-4 h-4 text-emerald-500" />
-            Add Shift Photo
-          </button>
+          {/* Thumbnail preview if direct photo loaded */}
+          {newPostImage && (
+            <div className="space-y-2.5 pt-1">
+              <div className="relative rounded-xl border border-slate-200 bg-slate-50 p-1.5 inline-block group">
+                <img
+                  src={newPostImage}
+                  alt="Base64 Upload Preview"
+                  className="max-h-48 rounded-lg w-auto object-contain"
+                  referrerPolicy="no-referrer"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewPostImage(undefined);
+                    setNewPostImageName("");
+                  }}
+                  className="absolute top-2.5 right-2.5 bg-slate-900/80 hover:bg-slate-805 rounded-full p-1 text-white border border-transparent cursor-pointer"
+                  id="clear-post-image-btn"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                <label htmlFor="new-post-image-name" className="block text-[10px] font-bold text-[#DA291C] uppercase tracking-wider mb-1">
+                  Name of the Photo (Printed on Feed Graphic)
+                </label>
+                <input
+                  type="text"
+                  required
+                  id="new-post-image-name"
+                  value={newPostImageName}
+                  onChange={(e) => setNewPostImageName(e.target.value)}
+                  placeholder="Type the exact name/label as you see in the photo..."
+                  className="w-full bg-white border border-slate-250/90 rounded-lg px-2.5 py-1.5 text-xs text-slate-850 placeholder-slate-400 focus:outline-none focus:border-[#DA291C]"
+                />
+              </div>
+            </div>
+          )}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={(e) => handleImageUpload(e, false)}
-            className="hidden"
-            id="picture-upload-input"
-          />
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            {/* File Upload Selector Action */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 hover:bg-slate-50 px-2.5 py-1 rounded-lg text-xs font-bold text-slate-500 hover:text-[#DA291C] transition-colors cursor-pointer select-none border border-slate-201/20"
+              id="post-picture-upload-trigger"
+            >
+              <ImageIcon className="w-4 h-4 text-emerald-500" />
+              Add Shift Photo
+            </button>
 
-          <button
-            type="submit"
-            id="newsfeed-publish-btn"
-            className="bg-[#DA291C] hover:bg-[#C21B10] text-[#FFFFFF] font-extrabold text-xs px-3.5 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs"
-          >
-            Publish Post
-          </button>
-        </div>
-      </form>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImageUpload(e, false)}
+              className="hidden"
+              id="picture-upload-input"
+            />
+
+            <button
+              type="submit"
+              id="newsfeed-publish-btn"
+              className="bg-[#DA291C] hover:bg-[#C21B10] text-[#FFFFFF] font-extrabold text-xs px-3.5 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs"
+            >
+              Publish Post
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* FEED POSTS TIMELINE */}
       <div className="space-y-3">
+        {committedQuery.trim() && (
+          <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-100/60 rounded-xl border border-slate-200/50 mt-1 select-none">
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-[#DA291C] rounded-full animate-ping"></span>
+              Search Results ({filteredFeed.length} found)
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInputValue("");
+                setCommittedQuery("");
+              }}
+              className="text-xs font-extrabold text-[#DA291C] hover:underline cursor-pointer"
+            >
+              Close Results
+            </button>
+          </div>
+        )}
         {feed.length === 0 ? (
           <div className="p-10 text-center rounded-xl bg-white border border-slate-200 space-y-1.5 shadow-2xs">
             <p className="text-xs font-bold text-slate-700">Your Operations feed is currently silent.</p>
             <p className="text-[11px] text-slate-400">Be the first to post any shift updates or capture checklist photos!</p>
           </div>
+        ) : filteredFeed.length === 0 ? (
+          <div className="p-8 text-center rounded-xl bg-white border border-slate-200 space-y-1.5 shadow-2xs">
+            <p className="text-xs font-bold text-slate-700">No matching posts found.</p>
+            <p className="text-[11px] text-slate-400 font-mono text-slate-400">No feed items matched your filter query. Try checking your search spelling.</p>
+            <button
+              onClick={() => {
+                setSearchInputValue("");
+                setCommittedQuery("");
+              }}
+              className="mt-2 text-xs font-bold text-[#DA291C] hover:underline cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg active:scale-95 transition-all text-[11px]"
+            >
+              Clear News Feed Search
+            </button>
+          </div>
+        ) : committedQuery.trim() ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {filteredFeed.map((post) => {
+              return (
+                <div 
+                  key={post.id} 
+                  className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs hover:shadow-xs transition-all flex flex-col h-full hover:-translate-y-0.5"
+                >
+                  {post.image ? (
+                    /* WITH PHOTO SIMPLIFIED VIEW */
+                    <div className="flex flex-col flex-1">
+                      <div className="relative bg-slate-50 border-b border-slate-100 flex-1 flex items-center justify-center p-2 min-h-[160px] max-h-[220px] overflow-hidden group">
+                        <img
+                          src={post.image}
+                          alt={post.imageName || "Matched Photo"}
+                          onClick={() => {
+                            setFullscreenImage({ src: post.image, caption: post.imageName });
+                            setZoomScale(1);
+                            setZoomPosition({ x: 0, y: 0 });
+                          }}
+                          className="max-h-full max-w-full object-contain rounded-lg cursor-zoom-in hover:scale-[1.02] transition-transform duration-150"
+                          referrerPolicy="no-referrer"
+                        />
+                        
+                        {post.imageName && (
+                          <div className="absolute bottom-2 left-2 right-2 bg-slate-900/85 backdrop-blur-xs text-white px-2.5 py-1.5 rounded-lg text-[10px] font-bold truncate flex items-center gap-1.5 shadow-sm border border-slate-750">
+                            <span className="text-[#DA291C]">📷</span> 
+                            <span className="truncate">NAME: {post.imageName}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3.5 space-y-2 flex flex-col justify-between">
+                        <p className="text-xs text-slate-705 font-medium line-clamp-2 leading-relaxed">
+                          {post.text || <span className="text-slate-400 italic">No text description</span>}
+                        </p>
+                        <div className="pt-2 border-t border-slate-105 flex items-center justify-between text-[10px] text-slate-500">
+                          <span className="truncate font-semibold text-slate-600">By {post.author}</span>
+                          <span className="text-slate-400 shrink-0 font-mono">
+                            {new Date(post.timestamp).toLocaleDateString([], { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveCommentPostId(post.id);
+                            setCommittedQuery("");
+                            setSearchInputValue("");
+                            setTimeout(() => {
+                              const el = document.getElementById(`feed-card-${post.id}`);
+                              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }, 200);
+                          }}
+                          className="mt-1 w-full text-center text-[10.5px] font-extrabold text-[#DA291C] bg-[#DA291C]/5 hover:bg-[#DA291C]/15 py-2 rounded-xl transition-colors cursor-pointer"
+                        >
+                          View Live Post &amp; Comments
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* TEXT ONLY SIMPLIFIED VIEW */
+                    <div className="p-4 flex flex-col justify-between h-full flex-1">
+                      <div className="space-y-1.5 flex-1 pb-3">
+                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 font-mono block">Text Update</span>
+                        <p className="text-xs text-slate-705 leading-relaxed line-clamp-4">
+                          {post.text}
+                        </p>
+                      </div>
+                      <div className="space-y-2 pt-2.5 mt-auto border-t border-slate-105">
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <span className="truncate font-semibold text-slate-600">By {post.author}</span>
+                          <span className="text-slate-400 font-mono">
+                            {new Date(post.timestamp).toLocaleDateString([], { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveCommentPostId(post.id);
+                            setCommittedQuery("");
+                            setSearchInputValue("");
+                            setTimeout(() => {
+                              const el = document.getElementById(`feed-card-${post.id}`);
+                              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }, 200);
+                          }}
+                          className="w-full text-center text-[10.5px] font-extrabold text-[#DA291C] bg-[#DA291C]/5 hover:bg-[#DA291C]/15 py-2 rounded-xl transition-colors cursor-pointer"
+                        >
+                          View Live Post &amp; Comments
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         ) : (
-          feed.map((post) => {
+          filteredFeed.map((post) => {
             const hasLiked = post.likedBy?.includes(currentSession.username) || false;
             const isEditingThisPost = editingPostId === post.id;
             const commentsList = post.comments || [];
@@ -635,7 +1003,7 @@ export default function NewsFeedPanel({
                     {commentsList.length > 0 && (
                       <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                         {commentsList.map((cmt) => (
-                          <div key={cmt.id} className="flex gap-2 items-start bg-slate-50 p-2 rounded-xl border border-slate-150">
+                           <div key={cmt.id} className="flex gap-2 items-start bg-slate-50 p-2 rounded-xl border border-slate-150">
                             {/* Avatar initials */}
                             <div className="w-6.5 h-6.5 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[9px] font-extrabold text-slate-700 shrink-0">
                               {cmt.author.slice(0, 2).toUpperCase()}

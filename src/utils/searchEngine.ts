@@ -109,15 +109,35 @@ export function searchEverything(schema: AppSchema, query: string): SearchResult
     const textMatch = post.text.toLowerCase().includes(q);
     const authorMatch = post.author.toLowerCase().includes(q);
     const roleMatch = post.role.toLowerCase().includes(q);
+    const imageNameMatch = post.imageName?.toLowerCase().includes(q) || false;
 
-    if (textMatch || authorMatch || roleMatch) {
-      const excerpt = post.text.length > 80 ? post.text.slice(0, 80) + "..." : post.text;
+    // Check comments too
+    const matchedComment = post.comments?.find(cmt => 
+      cmt.text.toLowerCase().includes(q) || 
+      cmt.author.toLowerCase().includes(q) || 
+      cmt.role.toLowerCase().includes(q)
+    );
+
+    if (textMatch || authorMatch || roleMatch || imageNameMatch || matchedComment) {
+      let snippet = "";
+      if (imageNameMatch && post.imageName) {
+        snippet = `📸 Photo Name Matched: "${post.imageName}"${post.text ? ` — ${post.text}` : ""}`;
+      } else if (matchedComment) {
+        snippet = `💬 Comment by ${matchedComment.author}: "${matchedComment.text}"`;
+      } else if (textMatch) {
+        snippet = post.text.length > 80 ? post.text.slice(0, 80) + "..." : post.text;
+      } else if (authorMatch) {
+        snippet = `Post published by ${post.author} (${post.role}): "${post.text}"`;
+      } else {
+        snippet = `Post Match: "${post.text}"`;
+      }
+
       results.push({
         id: post.id,
         type: "feed",
         title: `Feed post by ${post.author} (${post.role})`,
-        subtitle: "News Feed Update",
-        snippet: excerpt,
+        subtitle: post.imageName ? `News Feed Update • Photo: ${post.imageName}` : "News Feed Update",
+        snippet,
         originalObject: post
       });
     }
@@ -162,6 +182,18 @@ export function getQuickSuggestions(schema: AppSchema, typing: string): string[]
 
   schema.feed.forEach(f => {
     if (f.author.toLowerCase().includes(q)) suggestionsSet.add(f.author);
+    if (f.text.toLowerCase().includes(q)) {
+      const words = f.text.split(" ");
+      const matchingWord = words.find(w => w.toLowerCase().startsWith(q));
+      if (matchingWord) {
+        suggestionsSet.add(matchingWord);
+      } else {
+        suggestionsSet.add(f.text.length > 30 ? f.text.slice(0, 30) + "..." : f.text);
+      }
+    }
+    if (f.imageName && f.imageName.toLowerCase().includes(q)) {
+      suggestionsSet.add(f.imageName);
+    }
   });
 
   return Array.from(suggestionsSet).slice(0, 5); // Return top 5 suggestions
