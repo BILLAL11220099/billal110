@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AppSchema } from "../types";
 import { searchEverything, getQuickSuggestions, SearchResultItem } from "../utils/searchEngine";
-import { Search, Sparkles, BookOpen, Warehouse, CheckSquare, MessageSquare, Edit3, X } from "lucide-react";
+import { Search, Sparkles, BookOpen, Warehouse, CheckSquare, MessageSquare, MapPin, X } from "lucide-react";
 
 interface SearchGlobalProps {
   appData: AppSchema;
@@ -139,7 +139,7 @@ export default function SearchGlobal({ appData, onSelectItem }: SearchGlobalProp
           <div className="py-1">
             <div className="px-4 py-1.5 flex justify-between items-center text-[9px] font-bold text-slate-400 tracking-wider uppercase">
               <span>Matching Records ({results.length})</span>
-              <span>Click to Edit / View</span>
+              <span>Click to Locate Item</span>
             </div>
 
             {results.length === 0 ? (
@@ -186,7 +186,7 @@ export default function SearchGlobal({ appData, onSelectItem }: SearchGlobalProp
                       </div>
                     )}
                     <div className="text-slate-300 group-hover:text-[#DA291C] self-center pl-1">
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <MapPin className="w-3.5 h-3.5" />
                     </div>
                   </button>
                 ))}

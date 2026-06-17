@@ -21,6 +21,32 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ");
 }
 
+const isLiquidItem = (name: string, category?: string): boolean => {
+  const normName = name.toLowerCase();
+  const normCat = category ? category.toLowerCase() : "";
+  return (
+    normCat.includes("drinks") ||
+    normCat.includes("syrup") ||
+    normName.includes("oil") ||
+    normName.includes("drink") ||
+    normName.includes("syrup") ||
+    normName.includes("fanta") ||
+    normName.includes("sprite") ||
+    normName.includes("spite") || // Support for user's typo
+    normName.includes("coke") ||
+    normName.includes("cola") ||
+    normName.includes("fizz") ||
+    normName.includes("juice") ||
+    normName.includes("milk") ||
+    normName.includes("shake mix") ||
+    normName.includes("liquid")
+  );
+};
+
+const getItemUnit = (name: string, category?: string): string => {
+  return isLiquidItem(name, category) ? "L" : "pcs";
+};
+
 /**
  * Searches across the entire database, matching text patterns, single letters, and numbers.
  * Provides granular matches with snippets.
@@ -71,9 +97,21 @@ export function searchEverything(schema: AppSchema, query: string): SearchResult
       item.innersPerCase.toString().includes(q);
 
     if (nameMatch || categoryMatch || numberMatch) {
-      const breakdownText = item.innersPerCase === 1
-        ? `Conversion: 1 Case = ${item.pcsPerInner} Pcs`
-        : `Conversion: 1 Case = ${item.innersPerCase} Inners • 1 Inner = ${item.pcsPerInner} Pcs (${item.innersPerCase * item.pcsPerInner} total Pcs)`;
+      const u = getItemUnit(item.name, item.category);
+      const isLiquid = u === "L";
+      const unitLabel = isLiquid ? "Liters" : "Pcs";
+      const itemInnersParsed = parseInt(String(item.innersPerCase), 10);
+      const isOneCase = itemInnersParsed === 1 || String(item.innersPerCase).toLowerCase().includes("bulk");
+      const parsedPcs = parseFloat(String(item.pcsPerInner));
+      const parsedInners = parseFloat(String(item.innersPerCase));
+      const hasMathValue = !isNaN(parsedPcs) && !isNaN(parsedInners);
+      const totalValText = hasMathValue 
+        ? `${parsedInners * parsedPcs}` 
+        : `${item.pcsPerInner} × ${item.innersPerCase}`;
+
+      const breakdownText = isOneCase
+        ? `Conversion: 1 Case = ${item.pcsPerInner} ${unitLabel}`
+        : `Conversion: 1 Case = ${item.innersPerCase} ${isLiquid ? "Containers" : "Inners"} • 1 ${isLiquid ? "Container" : "Inner"} = ${item.pcsPerInner} ${item.pcsPerInner === 1 && isLiquid ? "Liter" : unitLabel} (${totalValText} total ${unitLabel})`;
       results.push({
         id: item.id,
         type: "inventory",

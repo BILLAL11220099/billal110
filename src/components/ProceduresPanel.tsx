@@ -65,7 +65,20 @@ export default function ProceduresPanel({
   // Focus Search Selected Procedure
   React.useEffect(() => {
     if (activeSelectedProcedure) {
-      handleEdit(activeSelectedProcedure);
+      setIsEditing(false);
+      setEditId(null);
+      setFilterCategory("All");
+      setSearchTerm("");
+      setTimeout(() => {
+        const element = document.getElementById(`proc-card-${activeSelectedProcedure.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          element.classList.add("ring-4", "ring-[#FFC72C]", "ring-offset-2", "transition-all", "duration-500");
+          setTimeout(() => {
+            element.classList.remove("ring-4", "ring-[#FFC72C]", "ring-offset-2");
+          }, 3500);
+        }
+      }, 150);
     }
   }, [activeSelectedProcedure]);
 
@@ -551,6 +564,7 @@ export default function ProceduresPanel({
                 <motion.div
                   layoutId={`proc-card-${item.id}`}
                   key={item.id}
+                  id={`proc-card-${item.id}`}
                   className="bg-white border border-slate-200/80 rounded-xl hover:border-slate-350 p-4.5 flex flex-col justify-between transition-all group overflow-hidden relative shadow-2xs"
                 >
                   <div className="space-y-3.5">

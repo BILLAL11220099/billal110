@@ -49,6 +49,7 @@ export function getStoredData(): AppSchema {
     if (!parsed.procedures) parsed.procedures = [];
     if (!parsed.checklist) parsed.checklist = [];
     if (!parsed.feed) parsed.feed = [];
+    if (!parsed.videos) parsed.videos = [];
     return parsed;
   } catch {
     return initialAppData;

@@ -16,8 +16,8 @@ export interface InventoryItem {
   name: string;
   category: InventoryCategory;
   // Conversion factors
-  pcsPerInner: number;    // How many pieces are in 1 inner
-  innersPerCase: number;  // How many inners are in 1 case
+  pcsPerInner: number | string;    // How many pieces are in 1 inner
+  innersPerCase: number | string;  // How many inners are in 1 case
   lidInfo?: string;       // Optional documentation/Lid info specs
   // Current stock
   cases: number;          // Full cases counted
@@ -73,6 +73,19 @@ export interface AppSchema {
   inventory: InventoryItem[];
   checklist: ChecklistItem[];
   feed: NewsFeedPost[];
+  videos?: VideoMetadata[];
+}
+
+export interface VideoMetadata {
+  id: string;
+  title: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedBy: string;
+  uploadedRole: string;
+  timestamp: string;
+  url?: string; // fallback or external video url if locally stored blob isn't loaded in browser DB
 }
 
 export interface BackupSnapshot {

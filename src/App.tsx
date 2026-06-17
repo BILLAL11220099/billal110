@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost } from "./types";
+import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost, VideoMetadata } from "./types";
 import { getStoredData, saveStoredData, resetDatabaseToDefault } from "./data/storageEngine";
 import { collection, getDocs } from "firebase/firestore";
 import { db, auth } from "./data/firebase";
@@ -20,7 +20,9 @@ import {
   deleteChecklistItemDoc,
   saveNewsFeedPostDoc,
   deleteNewsFeedPostDoc,
-  bulkWriteSchemaSnapshot
+  bulkWriteSchemaSnapshot,
+  saveVideoMetadataDoc,
+  deleteVideoMetadataDoc
 } from "./data/firebaseSync";
 import Login from "./components/Login";
 import SearchGlobal from "./components/SearchGlobal";
@@ -29,17 +31,19 @@ import InventoryPanel from "./components/InventoryPanel";
 import ChecklistsPanel from "./components/ChecklistsPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
+import VideoUploadSheet from "./components/VideoUploadSheet";
 
 import {
   BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
-  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw
+  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw, Video
 } from "lucide-react";
 
 function parseCollections(
   procDocs: any[],
   invDocs: any[],
   chkDocs: any[],
-  feedDocs: any[]
+  feedDocs: any[],
+  videoDocs: any[]
 ): AppSchema {
   const proceduresList: CompanyProcedure[] = [];
   procDocs.forEach((docSnap) => {
@@ -65,8 +69,8 @@ function parseCollections(
         id: data.id || docSnap.id,
         name: data.name || "Unnamed Item",
         category: data.category || "Other",
-        pcsPerInner: typeof data.pcsPerInner === "number" ? data.pcsPerInner : (Number(data.pcsPerInner) || 1),
-        innersPerCase: typeof data.innersPerCase === "number" ? data.innersPerCase : (Number(data.innersPerCase) || 1),
+        pcsPerInner: data.pcsPerInner !== undefined ? data.pcsPerInner : 1,
+        innersPerCase: data.innersPerCase !== undefined ? data.innersPerCase : 1,
         lidInfo: data.lidInfo || undefined,
         cases: typeof data.cases === "number" ? data.cases : (Number(data.cases) || 0),
         inners: typeof data.inners === "number" ? data.inners : (Number(data.inners) || 0),
@@ -112,11 +116,30 @@ function parseCollections(
   });
   feedList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+  const videosList: VideoMetadata[] = [];
+  videoDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data) {
+      videosList.push({
+        id: data.id || docSnap.id,
+        title: data.title || "Untitled Video",
+        fileName: data.fileName || "",
+        fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
+        fileType: data.fileType || "video/mp4",
+        uploadedBy: data.uploadedBy || "System Sync",
+        uploadedRole: data.uploadedRole || "Crew",
+        timestamp: data.timestamp || new Date().toISOString(),
+        url: data.url || undefined
+      });
+    }
+  });
+
   return {
     procedures: proceduresList,
     inventory: inventoryList,
     checklist: checklistList,
-    feed: feedList
+    feed: feedList,
+    videos: videosList
   };
 }
 
@@ -144,8 +167,11 @@ export default function App() {
     procedures: false,
     inventory: false,
     checklist: false,
-    feed: false
+    feed: false,
+    videos: false
   });
+
+  const [isVideoSheetOpen, setIsVideoSheetOpen] = useState(false);
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
 
@@ -165,13 +191,14 @@ export default function App() {
   useEffect(() => {
     const syncTimeout = setTimeout(() => {
       setInitialSyncProgress((prev) => {
-        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed) {
+        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed || !prev.videos) {
           console.warn("Initial Cloud connection took longer than 3.5s. Falling back to local replication cache.");
           return {
             procedures: true,
             inventory: true,
             checklist: true,
-            feed: true
+            feed: true,
+            videos: true
           };
         }
         return prev;
@@ -199,18 +226,20 @@ export default function App() {
       }
 
       try {
-        const [procSnap, invSnap, chkSnap, feedSnap] = await Promise.all([
+        const [procSnap, invSnap, chkSnap, feedSnap, vSnap] = await Promise.all([
           getDocs(collection(db, "procedures")),
           getDocs(collection(db, "inventory")),
           getDocs(collection(db, "checklist")),
-          getDocs(collection(db, "feed"))
+          getDocs(collection(db, "feed")),
+          getDocs(collection(db, "videos"))
         ]);
 
         const updated = parseCollections(
           procSnap.docs,
           invSnap.docs,
           chkSnap.docs,
-          feedSnap.docs
+          feedSnap.docs,
+          vSnap.docs
         );
 
         setAppData(updated);
@@ -225,7 +254,8 @@ export default function App() {
           procedures: true,
           inventory: true,
           checklist: true,
-          feed: true
+          feed: true,
+          videos: true
         });
       } catch (err) {
         console.error("Initial database load from cloud error:", err);
@@ -234,7 +264,8 @@ export default function App() {
           procedures: true,
           inventory: true,
           checklist: true,
-          feed: true
+          feed: true,
+          videos: true
         });
       }
     };
@@ -248,18 +279,20 @@ export default function App() {
     setIsForceSyncing(true);
     setSyncStatus("connecting");
     try {
-      const [procSnap, invSnap, chkSnap, feedSnap] = await Promise.all([
+      const [procSnap, invSnap, chkSnap, feedSnap, vSnap] = await Promise.all([
         getDocs(collection(db, "procedures")),
         getDocs(collection(db, "inventory")),
         getDocs(collection(db, "checklist")),
-        getDocs(collection(db, "feed"))
+        getDocs(collection(db, "feed")),
+        getDocs(collection(db, "videos"))
       ]);
 
       const updated = parseCollections(
         procSnap.docs,
         invSnap.docs,
         chkSnap.docs,
-        feedSnap.docs
+        feedSnap.docs,
+        vSnap.docs
       );
 
       setAppData(updated);
@@ -274,7 +307,8 @@ export default function App() {
         procedures: true,
         inventory: true,
         checklist: true,
-        feed: true
+        feed: true,
+        videos: true
       });
     } catch (err) {
       console.error("Force sync from cloud error:", err);
@@ -382,6 +416,27 @@ export default function App() {
     const updated = { ...appData, feed: newList };
     setAppData(updated);
     saveStoredData(updated, "Published Shift Notice on Feed");
+  };
+
+  const saveVideos = (newList: VideoMetadata[]) => {
+    const currentMap = new Map<string, VideoMetadata>((appData.videos || []).map((v) => [v.id, v]));
+    const newMap = new Map<string, VideoMetadata>(newList.map((v) => [v.id, v]));
+
+    for (const id of currentMap.keys()) {
+      if (!newMap.has(id)) {
+        deleteVideoMetadataDoc(id).catch(console.error);
+      }
+    }
+    for (const [id, value] of newMap.entries()) {
+      const existing = currentMap.get(id);
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(value)) {
+        saveVideoMetadataDoc(value).catch(console.error);
+      }
+    }
+
+    const updated = { ...appData, videos: newList };
+    setAppData(updated);
+    saveStoredData(updated, "Saved video training guidelines to shift ledger");
   };
 
   // Restore DB callback (triggered from backups snapshot restoration)
@@ -505,22 +560,22 @@ export default function App() {
     <div className="min-h-screen bg-[#F4F4F5] text-slate-900 flex flex-col font-sans selection:bg-[#FFC72C] selection:text-slate-950">
       
       {/* 1. PRIMARY APP BRAND HEADER BANNER */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm" id="main-crew-header">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)]" id="main-crew-header">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-15 flex items-center justify-between gap-4">
           
           {/* Brand logo block */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="w-8 h-8 bg-[#FFC72C] rounded-md flex items-center justify-center font-black text-[#DA291C] font-sans shadow-sm">
-              <span className="text-xl tracking-tighter leading-none select-none">M</span>
+          <div className="flex items-center gap-3.5 shrink-0">
+            <div className="w-9.5 h-9.5 bg-gradient-to-br from-[#FFD55C] to-[#FFC72C] rounded-xl flex items-center justify-center font-black text-[#DA291C] font-sans shadow-xs ring-2 ring-[#FFC72C]/10">
+              <span className="text-2xl tracking-tighter leading-none select-none drop-shadow-sm">M</span>
             </div>
             <div className="hidden sm:block">
-              <h1 className="text-sm font-extrabold tracking-tight text-slate-800 leading-tight">M-OPS</h1>
-              <p className="text-[9px] text-slate-400 font-sans tracking-widest font-semibold uppercase">OPERATIONS MANAGER</p>
+              <h1 className="text-xs font-black tracking-tight text-slate-900 leading-tight">M® CREW CORE</h1>
+              <p className="text-[8px] text-[#DA291C] font-black tracking-widest uppercase mt-0.5">OPS SYNC ENGINE</p>
             </div>
           </div>
 
           {/* Core SEARCH BAR always in focus */}
-          <div className="flex-1 max-w-lg mx-auto">
+          <div className="flex-1 max-w-md mx-auto">
             <SearchGlobal appData={appData} onSelectItem={handleSearchSelect} />
           </div>
 
@@ -530,26 +585,48 @@ export default function App() {
             <button
               onClick={forceSync}
               disabled={isForceSyncing}
-              className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] font-sans px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer hover:brightness-95 active:scale-95 disabled:opacity-75 disabled:cursor-not-allowed ${
+              className={`flex items-center gap-2.5 text-[10.5px] font-sans px-3.5 py-1.8 rounded-full border transition-all cursor-pointer hover:shadow-xs active:scale-95 disabled:opacity-85 disabled:cursor-not-allowed shadow-3xs ${
                 syncStatus === "connected"
-                  ? "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100"
+                  ? "text-emerald-800 bg-emerald-50/65 border-emerald-250/70 hover:bg-emerald-100/60"
                   : syncStatus === "error"
-                  ? "text-[#DA291C] bg-rose-50 border-rose-200 animate-pulse hover:bg-rose-100"
-                  : "text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100"
+                  ? "text-blue-800 bg-blue-50/65 border-blue-200/70 hover:bg-blue-100/60"
+                  : "text-amber-800 bg-amber-50/65 border-amber-200/70 hover:bg-amber-100/60"
               }`}
               title={
                 isForceSyncing
                   ? "Completing full cloud database re-sync..."
                   : syncStatus === "connected" 
-                  ? "Database synced on mount. Click to fetch updates manually!" 
+                  ? "Database fully synchronized. Click to re-sync manually!" 
                   : syncStatus === "error" 
-                  ? "Connection error. Click to retry sync..." 
-                  : "Connecting. Click to fetch cloud data!"
+                  ? "Operating safe in secure offline mode in memory. Click to re-sync!" 
+                  : "Connecting to database..."
               }
             >
-              <RefreshCw className={`w-3 h-3 ${isForceSyncing ? "animate-spin text-amber-500" : syncStatus === "connected" ? "text-emerald-500" : syncStatus === "error" ? "text-rose-500 animate-spin" : "text-amber-500 animate-pulse"}`} />
-              <span className="hidden sm:inline font-bold">
-                {isForceSyncing ? "Syncing..." : syncStatus === "connected" ? "Synced" : syncStatus === "error" ? "Offline/Err" : "Connecting"}
+              {/* Healthy/Synchronized Pulsing Dot */}
+              <span className="relative flex h-2 w-2 select-none">
+                {syncStatus === "connected" || syncStatus === "error" ? (
+                  <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${syncStatus === 'connected' ? 'bg-emerald-400' : 'bg-blue-400'}`}></span>
+                ) : null}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${syncStatus === 'connected' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-blue-500' : 'bg-amber-500 animate-pulse'}`}></span>
+              </span>
+
+              <span className="hidden sm:inline font-black tracking-tight uppercase text-[9px]">
+                {isForceSyncing ? "SYNCING..." : syncStatus === "connected" ? "CLOUD SECURE" : syncStatus === "error" ? "LOCAL SYNCED" : "CONNECTING"}
+              </span>
+
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-450 ${isForceSyncing ? "animate-spin text-amber-500" : ""}`} />
+            </button>
+
+            {/* Training & Operations Videos Sheet Trigger */}
+            <button
+              onClick={() => setIsVideoSheetOpen(true)}
+              className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-sans px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-extrabold shadow-2xs transition-all cursor-pointer active:scale-95"
+              title="Open Team Training & Shift Videos Uploader"
+            >
+              <Video className="w-3.5 h-3.5 text-[#DA291C]" />
+              <span className="hidden sm:inline">Video Hub</span>
+              <span className="bg-[#DA291C]/10 text-[#DA291C] px-1.5 py-0.2 rounded-full text-[9px] font-extrabold font-mono leading-none">
+                {(appData.videos || []).length}
               </span>
             </button>
 
@@ -777,6 +854,15 @@ export default function App() {
           <span>OPERATOR PORTAL • SECURE OFFLINE CLOUD RECOVERY • VERSION 2.4.1-STABLE</span>
         </div>
       </footer>
+
+      {/* 5. SLIDING VIDEO DRAWER PORTAL */}
+      <VideoUploadSheet
+        isOpen={isVideoSheetOpen}
+        onClose={() => setIsVideoSheetOpen(false)}
+        videos={appData.videos || []}
+        currentSession={session}
+        onSaveVideos={saveVideos}
+      />
 
     </div>
   );

@@ -62,9 +62,19 @@ export default function ChecklistsPanel({
   // Focus Search Selected Checklist Item
   React.useEffect(() => {
     if (activeSelectedChecklist) {
-      setEditingId(activeSelectedChecklist.id);
-      setEditText(activeSelectedChecklist.task);
-      setEditCategory(activeSelectedChecklist.category);
+      setEditingId(null);
+      setFilterCategory("All");
+      setSearchTerm("");
+      setTimeout(() => {
+        const element = document.getElementById(`checklist-row-${activeSelectedChecklist.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          element.classList.add("ring-2", "ring-[#FFC72C]", "ring-offset-1", "bg-amber-50/50", "transition-all", "duration-500");
+          setTimeout(() => {
+            element.classList.remove("ring-2", "ring-[#FFC72C]", "ring-offset-1", "bg-amber-50/50");
+          }, 3500);
+        }
+      }, 150);
     }
   }, [activeSelectedChecklist]);
 
