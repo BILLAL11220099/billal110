@@ -220,12 +220,12 @@ export default function VideoUploadSheet({
       return;
     }
 
+    const videoId = "vid_" + Date.now();
+
     setUploadProgress(10);
     setUploadStep("Caching locally inside browser...");
 
     try {
-      const videoId = "vid_" + Date.now();
-
       // Save binary blob to browser IndexedDB
       await storeVideoBlob(videoId, selectedFile);
       
@@ -327,7 +327,6 @@ export default function VideoUploadSheet({
         setUploadProgress(30);
         setUploadStep("Routing file to secure high-speed CDN fallback...");
         
-        const videoId = "vid_" + Date.now();
         const formData = new FormData();
         formData.append("file", selectedFile);
         formData.append("anonymous", "true");
@@ -366,6 +365,9 @@ export default function VideoUploadSheet({
           xhr.send(formData);
         });
 
+        // Store same file with same videoId inside IndexedDB if not done already
+        await storeVideoBlob(videoId, selectedFile).catch((e) => console.log("Silent IndexedDB write:", e));
+
         setUploadProgress(95);
         setUploadStep("Registering index with database...");
 
@@ -403,7 +405,9 @@ export default function VideoUploadSheet({
         
         // Final fallback: save locally
         try {
-          const videoId = "vid_" + Date.now();
+          // Double check IndexedDB written
+          await storeVideoBlob(videoId, selectedFile).catch((e) => console.log("Final IndexedDB write:", e));
+
           const objUrl = URL.createObjectURL(selectedFile);
           setLocalUrlMap(prev => ({ ...prev, [videoId]: objUrl }));
 
@@ -1038,8 +1042,20 @@ export default function VideoUploadSheet({
                               <div className="pt-2 border-t border-slate-105 flex items-center justify-between gap-2 shrink-0">
                                 <div className="flex items-center gap-1.5">
                                   <button
-                                    onClick={() => {
-                                      const url = localUrlMap[vid.id] || vid.url;
+                                    onClick={async () => {
+                                      let url = localUrlMap[vid.id] || vid.url;
+                                      if (!url) {
+                                        try {
+                                          const blob = await getVideoBlob(vid.id);
+                                          if (blob) {
+                                            const objUrl = URL.createObjectURL(blob);
+                                            setLocalUrlMap(prev => ({ ...prev, [vid.id]: objUrl }));
+                                            url = objUrl;
+                                          }
+                                        } catch (err) {
+                                          console.error("On-demand local blob recovery failed:", err);
+                                        }
+                                      }
                                       if (url) {
                                         setPlayingVideo({ id: vid.id, title: vid.title, url });
                                       } else {
