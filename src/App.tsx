@@ -7,8 +7,8 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost, VideoMetadata } from "./types";
 import { getStoredData, saveStoredData, resetDatabaseToDefault } from "./data/storageEngine";
-import { collection, getDocs } from "firebase/firestore";
-import { db, auth } from "./data/firebase";
+import { collection, getDocs, onSnapshot } from "firebase/firestore";
+import { db, auth, handleFirestoreError, OperationType } from "./data/firebase";
 import { signInAnonymously } from "firebase/auth";
 import {
   seedFirestoreIfNeeded,
@@ -208,9 +208,11 @@ export default function App() {
     return () => clearTimeout(syncTimeout);
   }, []);
 
-  // One-time Cloud Synchronization at app startup (Live Sync removed)
+  // Live Real-Time Multi-user synchronization
   useEffect(() => {
-    const loadInitialData = async () => {
+    let unsubs: (() => void)[] = [];
+
+    const initializeRealtimeListeners = async () => {
       setSyncStatus("connecting");
       try {
         await signInAnonymously(auth);
@@ -219,46 +221,188 @@ export default function App() {
       }
 
       try {
-        // Run seed check in background/sequentially
+        // Run seed check
         await seedFirestoreIfNeeded();
       } catch (err) {
         console.warn("Auto-seeding was skipped or encountered a transient issue:", err);
       }
 
-      try {
-        const [procSnap, invSnap, chkSnap, feedSnap, vSnap] = await Promise.all([
-          getDocs(collection(db, "procedures")),
-          getDocs(collection(db, "inventory")),
-          getDocs(collection(db, "checklist")),
-          getDocs(collection(db, "feed")),
-          getDocs(collection(db, "videos"))
-        ]);
-
-        const updated = parseCollections(
-          procSnap.docs,
-          invSnap.docs,
-          chkSnap.docs,
-          feedSnap.docs,
-          vSnap.docs
-        );
-
-        setAppData(updated);
-        try {
-          localStorage.setItem("mcd_crew_app_database", JSON.stringify(updated));
-        } catch (e) {
-          console.error("Local storage error in startup fetch:", e);
-        }
-
-        setSyncStatus("connected");
-        setInitialSyncProgress({
-          procedures: true,
-          inventory: true,
-          checklist: true,
-          feed: true,
-          videos: true
+      // Helper to update specific key inside appData state
+      const updateCollectionState = (key: keyof AppSchema, newList: any) => {
+        setAppData((prev) => {
+          const updated = { ...prev, [key]: newList };
+          try {
+            localStorage.setItem("mcd_crew_app_database", JSON.stringify(updated));
+          } catch (e) {
+            console.error(`Local storage error saving ${key}:`, e);
+          }
+          return updated;
         });
+        setInitialSyncProgress((prev) => ({ ...prev, [key]: true }));
+      };
+
+      try {
+        // 1. Subscribe to procedures
+        const unsubProc = onSnapshot(
+          collection(db, "procedures"),
+          (snapshot) => {
+            const list: CompanyProcedure[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  title: data.title || "Untitled Procedure",
+                  category: data.category || "General",
+                  content: data.content || "",
+                  image: data.image || undefined,
+                  lastUpdated: data.lastUpdated || new Date().toISOString(),
+                  updatedBy: data.updatedBy || "System Sync"
+                });
+              }
+            });
+            updateCollectionState("procedures", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Procedures listener error:", error);
+            handleFirestoreError(error, OperationType.GET, "procedures");
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubProc);
+
+        // 2. Subscribe to inventory
+        const unsubInv = onSnapshot(
+          collection(db, "inventory"),
+          (snapshot) => {
+            const list: InventoryItem[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  name: data.name || "Unnamed Item",
+                  category: data.category || "Other",
+                  pcsPerInner: data.pcsPerInner !== undefined ? data.pcsPerInner : 1,
+                  innersPerCase: data.innersPerCase !== undefined ? data.innersPerCase : 1,
+                  lidInfo: data.lidInfo || undefined,
+                  cases: typeof data.cases === "number" ? data.cases : (Number(data.cases) || 0),
+                  inners: typeof data.inners === "number" ? data.inners : (Number(data.inners) || 0),
+                  pcs: typeof data.pcs === "number" ? data.pcs : (Number(data.pcs) || 0),
+                  lastUpdated: data.lastUpdated || new Date().toISOString(),
+                  updatedBy: data.updatedBy || "System Sync"
+                });
+              }
+            });
+            updateCollectionState("inventory", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Inventory listener error:", error);
+            handleFirestoreError(error, OperationType.GET, "inventory");
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubInv);
+
+        // 3. Subscribe to checklist
+        const unsubChk = onSnapshot(
+          collection(db, "checklist"),
+          (snapshot) => {
+            const list: ChecklistItem[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  task: data.task || "",
+                  category: data.category || "Opening",
+                  completed: !!data.completed,
+                  completedBy: data.completedBy || "",
+                  timeCompleted: data.timeCompleted || ""
+                });
+              }
+            });
+            updateCollectionState("checklist", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Checklist listener error:", error);
+            handleFirestoreError(error, OperationType.GET, "checklist");
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubChk);
+
+        // 4. Subscribe to feed
+        const unsubFeed = onSnapshot(
+          collection(db, "feed"),
+          (snapshot) => {
+            const list: NewsFeedPost[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  author: data.author || "Crew Member",
+                  role: data.role || "Crew",
+                  text: data.text || "",
+                  image: data.image || undefined,
+                  imageName: data.imageName || undefined,
+                  likes: typeof data.likes === "number" ? data.likes : (Number(data.likes) || 0),
+                  likedBy: Array.isArray(data.likedBy) ? data.likedBy : [],
+                  comments: Array.isArray(data.comments) ? data.comments : [],
+                  timestamp: data.timestamp || new Date().toISOString()
+                });
+              }
+            });
+            list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            updateCollectionState("feed", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Feed listener error:", error);
+            handleFirestoreError(error, OperationType.GET, "feed");
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubFeed);
+
+        // 5. Subscribe to videos
+        const unsubVideos = onSnapshot(
+          collection(db, "videos"),
+          (snapshot) => {
+            const list: VideoMetadata[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  title: data.title || "Untitled Video",
+                  fileName: data.fileName || "",
+                  fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
+                  fileType: data.fileType || "video/mp4",
+                  uploadedBy: data.uploadedBy || "System Sync",
+                  uploadedRole: data.uploadedRole || "Crew",
+                  timestamp: data.timestamp || new Date().toISOString(),
+                  url: data.url || undefined
+                });
+              }
+            });
+            updateCollectionState("videos", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Videos listener error:", error);
+            handleFirestoreError(error, OperationType.GET, "videos");
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubVideos);
+
       } catch (err) {
-        console.error("Initial database load from cloud error:", err);
+        console.error("Realtime subscription error:", err);
         setSyncStatus("error");
         setInitialSyncProgress({
           procedures: true,
@@ -270,7 +414,11 @@ export default function App() {
       }
     };
 
-    loadInitialData();
+    initializeRealtimeListeners();
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
   }, []);
 
   // Force Full Real-Time Re-synchronization callback
