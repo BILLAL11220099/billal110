@@ -8,6 +8,8 @@ import { X, Video, Upload, Play, Download, Trash2, AlertCircle, CheckCircle, Fil
 import { VideoMetadata, UserSession } from "../types";
 import { storeVideoBlob, getVideoBlob, deleteVideoBlob } from "../utils/indexedDB";
 import SecurityModal from "./SecurityModal";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { storage } from "../data/firebase";
 
 interface VideoUploadSheetProps {
   isOpen: boolean;
@@ -85,9 +87,12 @@ export default function VideoUploadSheet({
             if (blob) {
               const url = URL.createObjectURL(blob);
               newMap[v.id] = url;
+            } else if (v.url) {
+              newMap[v.id] = v.url;
             }
           } catch (err) {
             console.error("Error creating local video url object:", err);
+            if (v.url) newMap[v.id] = v.url;
           }
         }
       }
@@ -173,31 +178,48 @@ export default function VideoUploadSheet({
     }
 
     setUploadProgress(10);
-    setUploadStep("Reading video frames...");
+    setUploadStep("Caching locally inside browser...");
 
     try {
       const videoId = "vid_" + Date.now();
-      
-      // Simulate progress beautifully for heavy files
-      const interval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev === null) return 10;
-          if (prev >= 90) {
-            clearInterval(interval);
-            return 90;
-          }
-          let increment = 15;
-          if (selectedFile.size > 100 * 1024 * 1024) increment = 5; // slow down for bigger files
-          return prev + increment;
-        });
-      }, 250);
 
       // Save binary blob to browser IndexedDB
       await storeVideoBlob(videoId, selectedFile);
       
-      clearInterval(interval);
+      setUploadProgress(30);
+      setUploadStep("Uploading file directly to Cloud Storage (friends can sync immediately)...");
+
+      // Upload to Firebase Cloud Storage so all crew members can see and stream it in real time
+      const fileRef = ref(storage, `videos/${videoId}_${selectedFile.name}`);
+      const uploadTask = uploadBytesResumable(fileRef, selectedFile);
+
+      const downloadUrl = await new Promise<string>((resolve, reject) => {
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 60);
+            setUploadProgress(30 + progress); // Scale 30% to 90%
+            const uploadedMB = (snapshot.bytesTransferred / (1024 * 1024)).toFixed(1);
+            const totalMB = (snapshot.totalBytes / (1024 * 1024)).toFixed(1);
+            setUploadStep(`Uploading to Server: ${uploadedMB} MB / ${totalMB} MB...`);
+          },
+          (error) => {
+            console.error("Cloud storage upload failed, fallback to local only", error);
+            reject(error);
+          },
+          async () => {
+            try {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+
       setUploadProgress(95);
-      setUploadStep("Syncing metadata index to Cloud...");
+      setUploadStep("Saving metadata records in Cloud database...");
 
       // Generate object URL for instant play
       const objUrl = URL.createObjectURL(selectedFile);
@@ -211,14 +233,15 @@ export default function VideoUploadSheet({
         fileType: selectedFile.type,
         uploadedBy: currentSession.username,
         uploadedRole: currentSession.role,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        url: downloadUrl
       };
 
       const updated = [newMeta, ...activeVideoList];
       onSaveVideos(updated);
 
       setUploadProgress(100);
-      setUploadStep("Complete!");
+      setUploadStep("Video synced successfully!");
 
       // Reset Form fields
       setTimeout(() => {
@@ -231,8 +254,42 @@ export default function VideoUploadSheet({
 
     } catch (err) {
       console.error(err);
-      setUploadProgress(null);
-      setUploadError("Operational Storage failure: Could not allocate memory inside sandbox database.");
+      
+      // Fallback: save local metadata if cloud storage fails
+      try {
+        const videoId = "vid_" + Date.now();
+        const objUrl = URL.createObjectURL(selectedFile);
+        setLocalUrlMap(prev => ({ ...prev, [videoId]: objUrl }));
+
+        const newMeta: VideoMetadata = {
+          id: videoId,
+          title: videoTitle.trim(),
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          fileType: selectedFile.type,
+          uploadedBy: currentSession.username,
+          uploadedRole: currentSession.role,
+          timestamp: new Date().toISOString()
+        };
+
+        const updated = [newMeta, ...activeVideoList];
+        onSaveVideos(updated);
+
+        setUploadProgress(100);
+        setUploadStep("Complete (Local Only)!");
+
+        setTimeout(() => {
+          setSelectedFile(null);
+          setVideoTitle("");
+          setUploadProgress(null);
+          setUploadStep("");
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }, 1000);
+      } catch (fallbackErr) {
+        console.error(fallbackErr);
+        setUploadProgress(null);
+        setUploadError("Operational Storage failure: Could not allocate memory inside sandbox database.");
+      }
     }
   };
 
@@ -254,8 +311,18 @@ export default function VideoUploadSheet({
 
   const triggerDeletion = (vidId: string, title: string) => {
     setSecModalMsg(`You must verify the McDonald's Crew Pin to remove the shift video guide '${title}'. This ensures other crew members don't lose operational learning procedures.`);
-    setSecConfirmCallback(() => () => {
-      // Execute Deletion
+    setSecConfirmCallback(() => async () => {
+      // Execute Deletion from Cloud Storage
+      try {
+        const vidFile = activeVideoList.find((v) => v.id === vidId);
+        if (vidFile && vidFile.url && vidFile.url.includes("firebasestorage.googleapis.com")) {
+          const fileRef = ref(storage, `videos/${vidId}_${vidFile.fileName}`);
+          await deleteObject(fileRef).catch((de) => console.log("Cloud file delete skipped:", de));
+        }
+      } catch (ce) {
+        console.warn("Could not remove cloud storage video resource:", ce);
+      }
+
       deleteVideoBlob(vidId).catch(console.error);
       const filtered = activeVideoList.filter(v => v.id !== vidId);
       onSaveVideos(filtered);
@@ -524,7 +591,7 @@ export default function VideoUploadSheet({
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => {
-                              const url = localUrlMap[vid.id];
+                              const url = localUrlMap[vid.id] || vid.url;
                               if (url) {
                                 setPlayingVideo({ id: vid.id, title: vid.title, url });
                                 setTimeout(() => {
@@ -532,7 +599,7 @@ export default function VideoUploadSheet({
                                   el?.scrollIntoView({ behavior: "smooth", block: "start" });
                                 }, 150);
                               } else {
-                                alert("Downloading/Buffering file payload... Try playing in a few seconds.");
+                                alert("Downloading or streaming file payload... Please try playing again.");
                               }
                             }}
                             className="bg-[#DA291C]/5 hover:bg-[#DA291C]/15 text-[#DA291C] px-3.5 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer flex items-center gap-1 shrink-0"

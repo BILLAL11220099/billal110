@@ -16,5 +16,9 @@ service cloud.firestore {
     match /feed/{postId} {
       allow read, write: if true;
     }
+
+    match /videos/{videoId} {
+      allow read, write: if true;
+    }
   }
 }

@@ -6,6 +6,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase
@@ -14,6 +15,7 @@ const app = initializeApp(firebaseConfig);
 // Create Firestore and Auth instances
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 // Mandatory Error Handling Types and Helper
 export enum OperationType {
