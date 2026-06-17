@@ -64,6 +64,23 @@
         "timestamp": { "type": "string" }
       },
       "required": ["id", "author", "role", "text", "likes", "likedBy", "comments", "timestamp"]
+    },
+    "VideoMetadata": {
+      "title": "Video Metadata",
+      "description": "Metadata for operations and shift video training guides",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "fileType": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "uploadedRole": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["id", "title", "fileName", "timestamp"]
     }
   },
   "firestore": {
@@ -82,6 +99,10 @@
     "feed": {
       "schema": "NewsFeedPost",
       "description": "Operations and team announcement feed posts"
+    },
+    "videos": {
+      "schema": "VideoMetadata",
+      "description": "Operations training and shift video guides"
     }
   }
 }

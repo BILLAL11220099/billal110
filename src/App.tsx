@@ -266,7 +266,11 @@ export default function App() {
           },
           (error) => {
             console.error("Procedures listener error:", error);
-            handleFirestoreError(error, OperationType.GET, "procedures");
+            try {
+              handleFirestoreError(error, OperationType.GET, "procedures");
+            } catch (errInfo) {
+              console.warn("Procedures cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
             setSyncStatus("error");
           }
         );
@@ -300,7 +304,11 @@ export default function App() {
           },
           (error) => {
             console.error("Inventory listener error:", error);
-            handleFirestoreError(error, OperationType.GET, "inventory");
+            try {
+              handleFirestoreError(error, OperationType.GET, "inventory");
+            } catch (errInfo) {
+              console.warn("Inventory cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
             setSyncStatus("error");
           }
         );
@@ -329,7 +337,11 @@ export default function App() {
           },
           (error) => {
             console.error("Checklist listener error:", error);
-            handleFirestoreError(error, OperationType.GET, "checklist");
+            try {
+              handleFirestoreError(error, OperationType.GET, "checklist");
+            } catch (errInfo) {
+              console.warn("Checklist cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
             setSyncStatus("error");
           }
         );
@@ -363,7 +375,11 @@ export default function App() {
           },
           (error) => {
             console.error("Feed listener error:", error);
-            handleFirestoreError(error, OperationType.GET, "feed");
+            try {
+              handleFirestoreError(error, OperationType.GET, "feed");
+            } catch (errInfo) {
+              console.warn("Feed cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
             setSyncStatus("error");
           }
         );
@@ -395,7 +411,11 @@ export default function App() {
           },
           (error) => {
             console.error("Videos listener error:", error);
-            handleFirestoreError(error, OperationType.GET, "videos");
+            try {
+              handleFirestoreError(error, OperationType.GET, "videos");
+            } catch (errInfo) {
+              console.warn("Videos cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
             setSyncStatus("error");
           }
         );
@@ -765,18 +785,7 @@ export default function App() {
               <RefreshCw className={`w-3.5 h-3.5 text-slate-450 ${isForceSyncing ? "animate-spin text-amber-500" : ""}`} />
             </button>
 
-            {/* Training & Operations Videos Sheet Trigger */}
-            <button
-              onClick={() => setIsVideoSheetOpen(true)}
-              className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-sans px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-extrabold shadow-2xs transition-all cursor-pointer active:scale-95"
-              title="Open Team Training & Shift Videos Uploader"
-            >
-              <Video className="w-3.5 h-3.5 text-[#DA291C]" />
-              <span className="hidden sm:inline">Video Hub</span>
-              <span className="bg-[#DA291C]/10 text-[#DA291C] px-1.5 py-0.2 rounded-full text-[9px] font-extrabold font-mono leading-none">
-                {(appData.videos || []).length}
-              </span>
-            </button>
+
 
             {/* Real-time UTC or Local clock */}
             <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
@@ -979,6 +988,8 @@ export default function App() {
                 currentSession={session}
                 onSave={saveFeed}
                 activeSelectedFeedPost={activeSelectedFeedPost}
+                onOpenVideoHub={() => setIsVideoSheetOpen(true)}
+                videosCount={(appData.videos || []).length}
               />
             )}
 

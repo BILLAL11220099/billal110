@@ -8,7 +8,7 @@ import { NewsFeedPost, NewsFeedComment, UserSession } from "../types";
 import {
   MessageSquare, ThumbsUp, Send, Image as ImageIcon, Trash2, Edit3,
   X, CheckSquare, Sparkles, HelpCircle, Save, Megaphone, ZoomIn, ZoomOut, RotateCcw,
-  Search, User, FileText
+  Search, User, FileText, Video
 } from "lucide-react";
 import SecurityModal from "./SecurityModal";
 
@@ -17,13 +17,17 @@ interface NewsFeedPanelProps {
   currentSession: UserSession;
   onSave: (feedList: NewsFeedPost[]) => void;
   activeSelectedFeedPost?: NewsFeedPost | null;
+  onOpenVideoHub?: () => void;
+  videosCount?: number;
 }
 
 export default function NewsFeedPanel({
   feed,
   currentSession,
   onSave,
-  activeSelectedFeedPost
+  activeSelectedFeedPost,
+  onOpenVideoHub,
+  videosCount = 0
 }: NewsFeedPanelProps) {
   // Listen for search-linked selected feed post
   React.useEffect(() => {
@@ -456,6 +460,38 @@ export default function NewsFeedPanel({
           </p>
         </div>
       </div>
+
+      {/* SHIFT VIDEO HUB DIRECT LINK BANNER */}
+      {onOpenVideoHub && (
+        <div 
+          onClick={onOpenVideoHub}
+          className="bg-gradient-to-r from-[#DA291C] to-[#C21B10] text-white p-4.5 rounded-2xl shadow-sm border border-red-700 flex items-center justify-between gap-4 cursor-pointer hover:shadow-md hover:brightness-105 active:scale-[0.99] transition-all"
+          id="shift-video-hub-feed-banner"
+        >
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="bg-white/10 p-3 rounded-xl border border-white/15 animate-pulse shrink-0">
+              <Video className="w-5.5 h-5.5 text-[#FFC72C] fill-[#FFC72C]" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-black tracking-tight uppercase">Shift Video Hub</h3>
+                <span className="bg-[#FFC72C] text-[#8B6E00] px-2 py-0.5 rounded-full text-[9px] font-black leading-none uppercase tracking-wider shadow-2xs">
+                  {videosCount} Video{videosCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-xs text-red-100 font-medium mt-1 truncate">
+                Interactive video guidelines and real-time team learning procedures. Upload or play now!
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="bg-[#FFC72C] hover:bg-[#ffe082] text-slate-900 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all shrink-0 active:scale-95 shadow-xs"
+          >
+            Open Hub
+          </button>
+        </div>
+      )}
 
       {/* DEDICATED NEWS FEED ONLY SEARCH BAR */}
       <div id="news-feed-local-search-container" className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2 relative">
