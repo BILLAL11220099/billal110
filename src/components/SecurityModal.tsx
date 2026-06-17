@@ -91,7 +91,7 @@ export default function SecurityModal({
           {requirePin && (
             <div className="space-y-2 pt-1 border-t border-slate-100">
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                Enter Security PIN code
+                Enter Security PIN code <span className="text-[#DA291C] font-extrabold">(use 36810)</span>
               </label>
               <div className="relative">
                 <input
