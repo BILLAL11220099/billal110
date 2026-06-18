@@ -58,6 +58,44 @@ export default function NewsFeedPanel({
   const [newPostText, setNewPostText] = useState("");
   const [newPostImage, setNewPostImage] = useState<string | undefined>(undefined);
   const [newPostImageName, setNewPostImageName] = useState("");
+
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  const analyzeUploadedImage = async (base64Image: string) => {
+    setIsAnalyzingImage(true);
+    setAnalysisError(null);
+    try {
+      const response = await fetch("/api/gemini/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64Image }),
+      });
+      if (!response.ok) {
+        throw new Error("HTTP error " + response.status);
+      }
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      if (data.title) {
+        setNewPostImageName(data.title);
+      }
+      if (data.description) {
+        setNewPostText(prev => {
+          if (prev.trim()) {
+            return prev + "\n\n--- AI Analysis of Photo ---\n" + data.description;
+          }
+          return data.description;
+        });
+      }
+    } catch (err: any) {
+      console.warn("Failed to auto-analyze photo using Gemini:", err);
+      setAnalysisError("AI analysis skipped or offline. You can still type details manually.");
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  };
   
   // Comment states
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
@@ -202,6 +240,7 @@ export default function NewsFeedPanel({
             setEditPostImage(compressedBase64);
           } else {
             setNewPostImage(compressedBase64);
+            analyzeUploadedImage(compressedBase64);
           }
         } else {
           // Fallback if canvas is not supported
@@ -209,6 +248,7 @@ export default function NewsFeedPanel({
             setEditPostImage(rawBase64);
           } else {
             setNewPostImage(rawBase64);
+            analyzeUploadedImage(rawBase64);
           }
         }
       };
@@ -606,6 +646,19 @@ export default function NewsFeedPanel({
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
+              {isAnalyzingImage && (
+                <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3 animate-pulse">
+                  <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span>Scanning image details with Gemini AI... Please wait.</span>
+                </div>
+              )}
+
+              {analysisError && (
+                <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                  <span>{analysisError}</span>
+                </div>
+              )}
+
               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                 <label htmlFor="new-post-image-name" className="block text-[10px] font-bold text-[#DA291C] uppercase tracking-wider mb-1">
                   Name of the Photo (Printed on Feed Graphic)
@@ -616,8 +669,9 @@ export default function NewsFeedPanel({
                   id="new-post-image-name"
                   value={newPostImageName}
                   onChange={(e) => setNewPostImageName(e.target.value)}
-                  placeholder="Type the exact name/label as you see in the photo..."
+                  placeholder={isAnalyzingImage ? "Gemini AI is analyzing name..." : "Type the exact name/label as you see in the photo..."}
                   className="w-full bg-white border border-slate-250/90 rounded-lg px-2.5 py-1.5 text-xs text-slate-850 placeholder-slate-400 focus:outline-none focus:border-[#DA291C]"
+                  disabled={isAnalyzingImage}
                 />
               </div>
             </div>

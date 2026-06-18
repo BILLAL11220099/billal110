@@ -4,6 +4,16 @@ import fs from "fs";
 import { exec } from "child_process";
 import multer from "multer";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 interface VideoMetadata {
   id: string;
@@ -233,6 +243,78 @@ async function startServer() {
   // REST API: Get all videos list
   app.get("/api/videos", (req, res) => {
     res.json(getVideosDb());
+  });
+
+  // REST API: Analyze image with Gemini 3.5 Flash
+  app.post("/api/gemini/analyze-image", async (req, res) => {
+    try {
+      const { image } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: "Image data is required" });
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        // Return placeholder fallback if key is missing
+        return res.json({
+          title: "Standard Operational Card",
+          description: "This is a detailed analysis placeholder for the uploaded shift photo. To enable real-time analysis using Gemini AI, make sure to add your API key in Settings > Secrets."
+        });
+      }
+
+      let mimeType = "image/png";
+      let base64Data = image;
+
+      if (image.startsWith("data:")) {
+        const matches = image.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          mimeType = matches[1];
+          base64Data = matches[2];
+        }
+      }
+
+      const imagePart = {
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      };
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: {
+          parts: [
+            imagePart,
+            {
+              text: "Carefully analyze this operational guideline, manual sheet, or kitchen photo. Identify the exact name or title of the photo if visible, or give it a highly relevant title based on the content (e.g. 'Crispy Chicken Assembly' or 'Grill Calibration Sheet'). Write an extremely detailed textual breakdown of every step, parameter, guideline, or instruction shown in the picture so that the post is highly rich and can be seamlessly searched using any keyword inside this photo."
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: {
+                type: Type.STRING,
+                description: "Clean, direct human-facing title of the photo. Max 8 words."
+              },
+              description: {
+                type: Type.STRING,
+                description: "A highly detailed, comprehensive textual summary of everything shown in the photo, step-by-step guidelines, numbers, and parameters."
+              }
+            },
+            required: ["title", "description"]
+          }
+        }
+      });
+
+      const resultText = response.text || "{}";
+      const parsedResult = JSON.parse(resultText.trim());
+      res.json(parsedResult);
+    } catch (err: any) {
+      console.error("Gemini Image Analysis failed:", err);
+      res.status(500).json({ error: "Gemini Image Analysis failed: " + err.message });
+    }
   });
 
   // REST API: Get status of a single video
