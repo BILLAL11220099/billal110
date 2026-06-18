@@ -92,9 +92,13 @@ export default function FutureStream({
       if (res.ok) {
         const data = await res.json();
         setServerVideos(data);
-        // Sync with parent's Firebase callback
+        // Sync with parent's Firebase callback (with security guard to avoid deleting Firestore values if server registry booted empty)
         if (onSaveVideos) {
-          onSaveVideos(data);
+          if (data.length > 0 || (videos && videos.length === 0)) {
+            onSaveVideos(data);
+          } else {
+            console.warn("[Sync Guard] Prevented Firestore wipe: server booted empty but Firestore contains active media metadata. Triggering self-heal.");
+          }
         }
       }
     } catch (err) {
@@ -107,6 +111,35 @@ export default function FutureStream({
   useEffect(() => {
     fetchServerVideos();
   }, []);
+
+  // Sync Firestore metadata back to the Express server if the server list is missing/empty but Firestore has records (re-hydration/auto-heal)
+  useEffect(() => {
+    if (isLoading || videos.length === 0) return; // Wait until initial fetch finishes
+    
+    const missingOnServer = videos.filter(
+      (pv) => !serverVideos.some((sv) => sv.id === pv.id)
+    );
+
+    if (missingOnServer.length > 0) {
+      console.log(`[Auto-Heal] Found ${missingOnServer.length} videos in Firestore missing from Server. Auto-syncing...`);
+      fetch("/api/videos/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(videos)
+      })
+        .then((res) => {
+          if (res.ok) {
+            return res.json();
+          }
+        })
+        .then((data) => {
+          if (data && data.videos) {
+            setServerVideos(data.videos);
+          }
+        })
+        .catch((err) => console.error("Auto-heal sync failed:", err));
+    }
+  }, [videos, serverVideos, isLoading]);
 
   // 2. Poll server for transcoding progress if any video is 'Converting'
   useEffect(() => {
@@ -321,6 +354,24 @@ export default function FutureStream({
 
   // Large Video Multipart Upload
   const uploadVideoFile = async (file: File) => {
+    // 1. Client-side File Validation
+    const allowedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
+    const fileExt = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+    
+    const isSupportedExtension = allowedExtensions.includes(fileExt);
+    const isSupportedMimetype = file.type.startsWith("video/");
+
+    if (!isSupportedExtension && !isSupportedMimetype) {
+      showToast(`Unsupported format: "${file.name}". Allowed files: MP4, MOV, AVI, MKV, WEBM.`, "warn");
+      return;
+    }
+
+    const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
+    if (file.size > MAX_SIZE) {
+      showToast(`File too large: "${file.name}". Maximum allow limit is 500 MB.`, "warn");
+      return;
+    }
+
     const tempId = "upload_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
     setUploadProgressList(prev => ({
       ...prev,
@@ -354,36 +405,54 @@ export default function FutureStream({
         }
       };
 
-      // Handle server response
-      xhr.onload = async () => {
+      // Handle server response safely (asynchronous)
+      xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          const response = JSON.parse(xhr.responseText);
-          showToast(`Video uploaded and processed successfully!`, "success");
-          
-          // Poll list immediately
-          fetchServerVideos(true);
+          try {
+            const response = JSON.parse(xhr.responseText);
+            showToast(`Video uploaded and processed successfully!`, "success");
+            
+            // Poll list immediately
+            fetchServerVideos(true);
 
-          // Update progress record to display active transcoding
+            // Update progress record to display active transcoding
+            setUploadProgressList(prev => ({
+              ...prev,
+              [tempId]: { ...prev[tempId], progress: 100, status: "Optimized successfully! Video is online now." }
+            }));
+
+            // Clear upload card from list after 5 seconds
+            setTimeout(() => {
+              setUploadProgressList(prev => {
+                const cpy = { ...prev };
+                delete cpy[tempId];
+                return cpy;
+              });
+            }, 5000);
+          } catch (e) {
+            console.error("Error parsing success payload:", e);
+          }
+        } else {
+          let errorMsg = "Server rejected upload payload";
+          try {
+            const errRes = JSON.parse(xhr.responseText);
+            if (errRes && errRes.error) errorMsg = errRes.error;
+          } catch (_) {}
+          
+          showToast(`Upload failed: ${errorMsg}`, "warn");
           setUploadProgressList(prev => ({
             ...prev,
-            [tempId]: { ...prev[tempId], progress: 100, status: "Optimized successfully! Video is online now." }
+            [tempId]: { ...prev[tempId], progress: 0, status: `Error: ${errorMsg}` }
           }));
-
-          // Clear upload card from list after 5 seconds
-          setTimeout(() => {
-            setUploadProgressList(prev => {
-              const cpy = { ...prev };
-              delete cpy[tempId];
-              return cpy;
-            });
-          }, 5000);
-        } else {
-          throw new Error("Server rejected upload payload");
         }
       };
 
       xhr.onerror = () => {
-        throw new Error("Network request failure");
+        showToast("Upload failed due to network request failure.", "warn");
+        setUploadProgressList(prev => ({
+          ...prev,
+          [tempId]: { ...prev[tempId], progress: 0, status: "Error: Network request failure." }
+        }));
       };
 
       xhr.open("POST", "/api/videos/upload");
@@ -391,10 +460,10 @@ export default function FutureStream({
 
     } catch (err) {
       console.error("Upload process error:", err);
-      showToast("Upload failed. Verify file size less than 500MB and connectivity.", "warn");
+      showToast("Upload failed. Verify connection and try again.", "warn");
       setUploadProgressList(prev => ({
         ...prev,
-        [tempId]: { ...prev[tempId], progress: 0, status: "Error uploading file." }
+        [tempId]: { ...prev[tempId], progress: 0, status: "Error dispatching upload." }
       }));
     }
   };
@@ -787,7 +856,7 @@ export default function FutureStream({
               {/* Secure Download Links & Direct Replication */}
               <div className="space-y-2 border-t border-slate-800 pt-3">
                 <a
-                  href={`/uploads/${playingVideo.id}/source${playingVideo.fileName ? '.' + playingVideo.fileName.split('.').pop() : '.mp4'}`}
+                  href={`/api/videos/${playingVideo.id}/download`}
                   download={playingVideo.fileName || `${playingVideo.title}.mp4`}
                   className="w-full bg-slate-800 hover:bg-slate-750 text-slate-200 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all text-center"
                 >
