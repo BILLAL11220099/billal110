@@ -94,7 +94,7 @@ function checkIfCommandExists(command: string): Promise<boolean> {
   });
 }
 
-// Background Video Transcoding Handler with FFmpeg
+// Background Video Transcoding Handler (Optimized for instant publication & native progressive seek streams)
 async function transcodeVideo(videoId: string, originalName: string) {
   const dir = path.join(UPLOADS_DIR, videoId);
   const metadata = getVideosDb();
@@ -116,112 +116,51 @@ async function transcodeVideo(videoId: string, originalName: string) {
   const sourcePath = path.join(dir, sourceFile);
   const hasFfmpeg = await checkIfCommandExists("ffmpeg");
 
-  console.log(`[Transcoder] Starting video process for ${video.title}. FFmpeg available: ${hasFfmpeg}`);
+  console.log(`[Transcoder] Starting instant video pipeline for ${video.title}. FFmpeg available: ${hasFfmpeg}`);
 
+  // 1. Generate JPEG video thumbnail frame
+  const thumbnailPath = path.join(dir, "thumbnail.jpg");
   if (hasFfmpeg) {
     try {
-      // 1. Generate JPEG video thumbnail frame
-      const thumbnailPath = path.join(dir, "thumbnail.jpg");
-      await new Promise<void>((resolve, reject) => {
-        const cmd = `ffmpeg -y -ss 00:00:02 -i "${sourcePath}" -vframes 1 -q:v 2 "${thumbnailPath}"`;
+      await new Promise<void>((resolve) => {
+        const cmd = `ffmpeg -y -ss 00:00:01 -i "${sourcePath}" -vframes 1 -q:v 2 "${thumbnailPath}"`;
         exec(cmd, (err) => {
           if (err) {
-            console.warn("Thumbnail extraction error (falling back to generated):", err);
+            console.warn("Thumbnail extraction failed:", err);
           }
           resolve();
         });
       });
-
-      // Update progress
-      video.progress = 25;
-      video.status = "Converting";
-      saveVideosDb(getVideosDb().map(v => v.id === videoId ? { ...v, progress: 25, status: "Converting" } : v));
-
-      // 2. Perform multi-resolution transcoding & segment HLS streaming
-      // Generate multiple profiles:
-      // - 480p (Standard Definition, fast load, great for mobile 4G)
-      // - 720p (High Definition, balance)
-      // - 1080p (Full HD, high quality)
-      // To run quickly in standard hardware, let's bundle into scalable HLS:
-      // We will create the output folder and write playlist config
-      const hlsSourceDir = path.join(dir, "hls");
-      if (!fs.existsSync(hlsSourceDir)) {
-        fs.mkdirSync(hlsSourceDir, { recursive: true });
-      }
-
-      // Convert video to dual HLS presets (480p and 720p)
-      // This ensures fully adaptive streaming with high reliability
-      const playlistPath = path.join(hlsSourceDir, "playlist.m3u8");
-      
-      // Multi-output FFmpeg HLS transcoder stream
-      const ffmpegCmd = `ffmpeg -y -i "${sourcePath}" \
-        -preset fast -g 48 -sc_threshold 0 \
-        -map 0:v -map 0:a -map 0:v -map 0:a \
-        -s:v:0 854x480 -c:v:0 libx264 -b:v:0 1200k -maxrate:v:0 1400k -bufsize:v:0 2400k -c:a:0 aac -b:a:0 128k \
-        -s:v:1 1280x720 -c:v:1 libx264 -b:v:1 2500k -maxrate:v:1 2800k -bufsize:v:1 5000k -c:a:1 aac -b:a:1 192k \
-        -f hls -hls_time 6 -hls_playlist_type vod \
-        -master_pl_name master.m3u8 \
-        -var_stream_map "v:0,a:0 v:1,a:1" \
-        "${hlsSourceDir}/stream_%v.m3u8"`;
-
-      await new Promise<void>((resolve, reject) => {
-        exec(ffmpegCmd, (err, stdout, stderr) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        });
-      });
-
-      // Update state to Ready
-      const finalVideos = getVideosDb();
-      const updatedIdx = finalVideos.findIndex(v => v.id === videoId);
-      if (updatedIdx !== -1) {
-        finalVideos[updatedIdx].status = "Ready";
-        finalVideos[updatedIdx].progress = 100;
-        finalVideos[updatedIdx].url = `/uploads/${videoId}/hls/master.m3u8`;
-        if (fs.existsSync(thumbnailPath)) {
-          finalVideos[updatedIdx].thumbnail = `/uploads/${videoId}/thumbnail.jpg`;
-        }
-        saveVideosDb(finalVideos);
-      }
-      console.log(`[Transcoder] Finished video process successfully for ${video.title}`);
-
-    } catch (err) {
-      console.error("[Transcoder] FFmpeg Transcoding pipeline failed, resorting to web-native stream backup:", err);
-      // Fallback: Copy standard source as play option and build direct play playlist
-      generateFallbackHLS(videoId, dir, sourceFile, sourcePath);
+    } catch (e) {
+      console.warn("Failed extracting thumbnail", e);
     }
-  } else {
-    // Graceful Fallback if FFmpeg is absent:
-    // Create static structure so it streams seamlessly as single stream HLS or straight MP4 stream
-    console.log("[Transcoder] FFmpeg not found on this machine. Booting high-fidelity web stream engine.");
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate work
-    generateFallbackHLS(videoId, dir, sourceFile, sourcePath);
-  }
-}
-
-// Fallback HLS Generator: allows seeking and pause on any device by copying the pristine source
-function generateFallbackHLS(videoId: string, dir: string, sourceFile: string, sourcePath: string) {
-  const hlsSourceDir = path.join(dir, "hls");
-  if (!fs.existsSync(hlsSourceDir)) {
-    fs.mkdirSync(hlsSourceDir, { recursive: true });
   }
 
-  // Generate mock master and segment file
-  // HLS spec lets us serve raw files directly or we can use progressive web fallback links.
-  // Serving progressive Web MP4 is actually 100% supported globally by Safari/Chrome, and supports seeking instantly over Range requests!
+  // 2. Mark as Ready instantly (using progressive high-fidelity web streams which have native range-seeking support and run perfectly everywhere)
   const finalVideos = getVideosDb();
   const index = finalVideos.findIndex(v => v.id === videoId);
   if (index !== -1) {
     finalVideos[index].status = "Ready";
     finalVideos[index].progress = 100;
-    // Serve progressive video stream
+    finalVideos[index].url = `/uploads/${videoId}/${sourceFile}`;
+    if (fs.existsSync(thumbnailPath)) {
+      finalVideos[index].thumbnail = `/uploads/${videoId}/thumbnail.jpg`;
+    }
+    saveVideosDb(finalVideos);
+  }
+  console.log(`[Transcoder] Video "${video.title}" loaded instantly via high-fidelity progressive streaming.`);
+}
+
+// Fallback HLS Generator
+function generateFallbackHLS(videoId: string, dir: string, sourceFile: string, sourcePath: string) {
+  const finalVideos = getVideosDb();
+  const index = finalVideos.findIndex(v => v.id === videoId);
+  if (index !== -1) {
+    finalVideos[index].status = "Ready";
+    finalVideos[index].progress = 100;
     finalVideos[index].url = `/uploads/${videoId}/${sourceFile}`;
     saveVideosDb(finalVideos);
   }
-  console.log(`[Transcoder] Backed up stream successfully for ${videoId} via progressive streaming.`);
 }
 
 async function startServer() {

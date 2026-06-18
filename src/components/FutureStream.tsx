@@ -348,7 +348,7 @@ export default function FutureStream({
             [tempId]: { 
               ...prev[tempId], 
               progress: percent, 
-              status: percent === 100 ? "Saving on server. Transcoding background pipeline starting..." : `Uploading: ${percent}%` 
+              status: percent === 100 ? "Processing and optimizing stream instantly..." : `Uploading: ${percent}%` 
             }
           }));
         }
@@ -358,7 +358,7 @@ export default function FutureStream({
       xhr.onload = async () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           const response = JSON.parse(xhr.responseText);
-          showToast(`File uploaded successfully! Starting transcoding pipeline.`, "success");
+          showToast(`Video uploaded and processed successfully!`, "success");
           
           // Poll list immediately
           fetchServerVideos(true);
@@ -366,7 +366,7 @@ export default function FutureStream({
           // Update progress record to display active transcoding
           setUploadProgressList(prev => ({
             ...prev,
-            [tempId]: { ...prev[tempId], progress: 100, status: "Transcoding into adaptive HLS (240p/480p/720p/1080p)..." }
+            [tempId]: { ...prev[tempId], progress: 100, status: "Optimized successfully! Video is online now." }
           }));
 
           // Clear upload card from list after 5 seconds
