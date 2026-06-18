@@ -86,6 +86,14 @@ export interface VideoMetadata {
   uploadedRole: string;
   timestamp: string;
   url?: string; // fallback or external video url if locally stored blob isn't loaded in browser DB
+  description?: string;
+  category?: string;
+  thumbnail?: string; // Base64 or ObjectURL of the generated thumbnail image
+  isPrivate?: boolean;
+  likes?: number;
+  likedBy?: string[];
+  views?: number;
+  downloads?: number;
 }
 
 export interface BackupSnapshot {

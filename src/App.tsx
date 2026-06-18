@@ -31,7 +31,7 @@ import InventoryPanel from "./components/InventoryPanel";
 import ChecklistsPanel from "./components/ChecklistsPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
-import VideoUploadSheet from "./components/VideoUploadSheet";
+import FutureStream from "./components/FutureStream";
 
 import {
   BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
@@ -154,7 +154,7 @@ export default function App() {
   });
 
   const [appData, setAppData] = useState<AppSchema>(() => getStoredData());
-  const [activeTab, setActiveTab] = useState<"procedures" | "inventory" | "checklist" | "feed" | "backups">("procedures");
+  const [activeTab, setActiveTab] = useState<"procedures" | "inventory" | "checklist" | "feed" | "futurestream" | "backups">("procedures");
   
   // Real-time Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -170,8 +170,6 @@ export default function App() {
     feed: false,
     videos: false
   });
-
-  const [isVideoSheetOpen, setIsVideoSheetOpen] = useState(false);
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
 
@@ -924,6 +922,22 @@ export default function App() {
               News Feed
             </button>
 
+            {/* tab: FutureStream */}
+            <button
+              id="tab-futurestream-trigger"
+              onClick={() => {
+                setActiveTab("futurestream");
+              }}
+              className={`flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
+                activeTab === "futurestream"
+                  ? "bg-violet-50 text-violet-800 border border-violet-200 shadow-xs"
+                  : "bg-transparent border border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+              }`}
+            >
+              <Video className="w-4 h-4 shrink-0 text-violet-500" />
+              FutureStream
+            </button>
+
             {/* tab: Backups Security */}
             <button
               id="tab-backups-trigger"
@@ -988,8 +1002,8 @@ export default function App() {
                 currentSession={session}
                 onSave={saveFeed}
                 activeSelectedFeedPost={activeSelectedFeedPost}
-                onOpenVideoHub={() => setIsVideoSheetOpen(true)}
-                videosCount={(appData.videos || []).length}
+                videos={appData.videos || []}
+                onSaveVideos={saveVideos}
               />
             )}
 
@@ -997,6 +1011,14 @@ export default function App() {
               <BackupsPanel
                 appData={appData}
                 onRestoreSuccess={handleBackupRestore}
+              />
+            )}
+
+            {activeTab === "futurestream" && (
+              <FutureStream
+                videos={appData.videos || []}
+                onSaveVideos={saveVideos}
+                currentSession={session}
               />
             )}
           </motion.div>
@@ -1013,15 +1035,6 @@ export default function App() {
           <span>OPERATOR PORTAL • SECURE OFFLINE CLOUD RECOVERY • VERSION 2.4.1-STABLE</span>
         </div>
       </footer>
-
-      {/* 5. SLIDING VIDEO DRAWER PORTAL */}
-      <VideoUploadSheet
-        isOpen={isVideoSheetOpen}
-        onClose={() => setIsVideoSheetOpen(false)}
-        videos={appData.videos || []}
-        currentSession={session}
-        onSaveVideos={saveVideos}
-      />
 
     </div>
   );
