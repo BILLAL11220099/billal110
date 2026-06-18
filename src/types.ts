@@ -94,6 +94,8 @@ export interface VideoMetadata {
   likedBy?: string[];
   views?: number;
   downloads?: number;
+  status?: "Uploading" | "Converting" | "Ready" | "Error";
+  progress?: number;
 }
 
 export interface BackupSnapshot {
