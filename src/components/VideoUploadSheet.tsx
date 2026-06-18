@@ -90,7 +90,7 @@ export default function VideoUploadSheet({
   const [uploadStep, setUploadStep] = useState<string>("");
   
   // Custom video playback configuration controls
-  const [playingVideo, setPlayingVideo] = useState<{ id: string; title: string; url: string } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ id: string; title: string; url: string; fileType?: string } | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const videoPlayerRef = useRef<HTMLVideoElement>(null);
   
@@ -641,26 +641,49 @@ export default function VideoUploadSheet({
                   {/* High Quality Video Stage */}
                   <div className="relative aspect-video bg-slate-950 rounded-2xl overflow-hidden shadow-lg border border-slate-900 group">
                     <video 
+                      key={playingVideo.id}
                       ref={videoPlayerRef}
-                      src={playingVideo.url} 
                       controls 
                       autoPlay
                       preload="auto"
-                      crossOrigin="anonymous"
                       className="w-full h-full object-contain"
                       playsInline
-                    />
+                      webkit-playsinline="true"
+                    >
+                      <source src={playingVideo.url} type={playingVideo.fileType || "video/mp4"} />
+                      <source src={playingVideo.url} type="video/quicktime" />
+                      <source src={playingVideo.url} type="video/mp4" />
+                      <source src={playingVideo.url} type="video/webm" />
+                    </video>
                     
                     {/* Control HUD Overlay */}
                     <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 z-10">
                       <button 
                         onClick={requestFullscreen}
-                        className="bg-black/70 hover:bg-black/90 backdrop-blur-xs text-white p-2 rounded-lg transition-all shadow-sm cursor-pointer border border-white/10"
+                        className="bg-black/70 hover:bg-black/95 backdrop-blur-xs text-white p-2 rounded-lg transition-all shadow-sm cursor-pointer border border-white/10"
                         title="Fullscreen"
                       >
                         <Maximize className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                  </div>
+
+                  {/* Fallback & Resilient Help on Mobile Playbacks */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-indigo-50/50 border border-indigo-150 rounded-xl p-3">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 text-indigo-550 shrink-0" />
+                      <p className="text-[10.5px] text-slate-650 font-sans font-medium">
+                        Mobile Playback Issue? Some phones require native playbacks.
+                      </p>
+                    </div>
+                    <a 
+                      href={playingVideo.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider text-center transition-all cursor-pointer shadow-2xs shrink-0 flex items-center justify-center gap-1"
+                    >
+                      Open Natively <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
 
                   {/* Playback Configuration Custom Tools */}
@@ -1057,7 +1080,7 @@ export default function VideoUploadSheet({
                                         }
                                       }
                                       if (url) {
-                                        setPlayingVideo({ id: vid.id, title: vid.title, url });
+                                        setPlayingVideo({ id: vid.id, title: vid.title, url, fileType: vid.fileType });
                                       } else {
                                         alert("Downloading payload or streaming link not ready... Please try playing again.");
                                       }
