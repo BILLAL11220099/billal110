@@ -26,14 +26,16 @@ import {
 } from "./data/firebaseSync";
 import Login from "./components/Login";
 import SearchGlobal from "./components/SearchGlobal";
+import DashboardPanel from "./components/DashboardPanel";
 import ProceduresPanel from "./components/ProceduresPanel";
 import InventoryPanel from "./components/InventoryPanel";
-import ChecklistsPanel from "./components/ChecklistsPanel";
+import DailySystemPanel from "./components/DailySystemPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
+import VideoUploadSheet from "./components/VideoUploadSheet";
 
 import {
-  BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
+  LayoutDashboard, BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
   LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw
 } from "lucide-react";
 
@@ -153,7 +155,7 @@ export default function App() {
   });
 
   const [appData, setAppData] = useState<AppSchema>(() => getStoredData());
-  const [activeTab, setActiveTab] = useState<"procedures" | "inventory" | "checklist" | "feed" | "backups">("procedures");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "procedures" | "inventory" | "checklist" | "feed" | "backups">("dashboard");
   
   // Real-time Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -171,6 +173,7 @@ export default function App() {
   });
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
+  const [isVideoHubOpen, setIsVideoHubOpen] = useState(false);
 
   // Search-linked active structures (for opening editors directly)
   const [activeSelectedProcedure, setActiveSelectedProcedure] = useState<CompanyProcedure | null>(null);
@@ -722,8 +725,19 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F4F5] text-slate-900 flex flex-col font-sans selection:bg-[#FFC72C] selection:text-slate-950">
+    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 flex flex-col font-sans selection:bg-[#FFC72C] selection:text-slate-950 relative">
       
+      {/* Subtle McDonald's Golden Arches Vector Watermark Background */}
+      <div className="fixed inset-0 pointer-events-none select-none z-0 overflow-hidden flex items-center justify-center">
+        <svg 
+          className="w-[130vw] h-[130vw] sm:w-[80vw] sm:h-[80vw] md:w-[60vw] md:h-[60vw] lg:w-[45vw] lg:h-[45vw] opacity-[0.16] dark:opacity-[0.08] text-[#FFC72C] fill-current transform scale-100 transition-all duration-300" 
+          viewBox="0 0 500 450" 
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path d="M 64.93,391.8 C 64.93,250.2 118.8,110.4 186.2,110.4 C 238.1,110.4 259.7,185.3 259.7,249.2 C 259.7,185.3 281.3,110.4 333.2,110.4 C 400.6,110.4 454.5,250.2 454.5,391.8 L 398.9,391.8 C 398.9,286.9 367.6,163.5 333.2,163.5 C 304.7,163.5 289.4,228.6 289.4,302.3 L 289.4,391.8 L 229.9,391.8 L 229.9,302.3 C 229.9,228.6 214.6,163.5 186.2,163.5 C 151.7,163.5 120.4,286.9 120.4,391.8 L 64.93,391.8 Z" />
+        </svg>
+      </div>
+
       {/* 1. PRIMARY APP BRAND HEADER BANNER */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)]" id="main-crew-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-15 flex items-center justify-between gap-4">
@@ -850,10 +864,26 @@ export default function App() {
       )}
 
       {/* 2. TAB SELECTION RIBBON */}
-      <div className="bg-white border-b border-slate-200 sticky top-14 z-30" id="tabs-ribbon-bar">
+      <div className="bg-white border-b border-slate-201 sticky top-14 z-30" id="tabs-ribbon-bar">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex items-center gap-1.5 py-2 overflow-x-auto no-scrollbar scroll-smooth">
             
+            {/* tab: Dashboard */}
+            <button
+              id="tab-dashboard-trigger"
+              onClick={() => {
+                setActiveTab("dashboard");
+              }}
+              className={`flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
+                activeTab === "dashboard"
+                  ? "bg-[#FFC72C]/15 text-[#8B6E00] border border-[#FFC72C]/30 shadow-xs font-extrabold"
+                  : "bg-transparent border border-transparent text-slate-500 hover:bg-slate-55 hover:text-slate-800"
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 shrink-0 text-[#DA291C]" />
+              Dashboard
+            </button>
+
             {/* tab: Procedures */}
             <button
               id="tab-procedures-trigger"
@@ -897,12 +927,12 @@ export default function App() {
               }}
               className={`flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
                 activeTab === "checklist"
-                  ? "bg-blue-50 text-blue-800 border border-blue-200 shadow-xs"
+                  ? "bg-blue-50 text-blue-850 border border-blue-200 shadow-xs dark:bg-amber-450/10 dark:text-amber-400 dark:border-amber-900"
                   : "bg-transparent border border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800"
               }`}
             >
-              <CheckSquare className="w-4 h-4 shrink-0" />
-              Daily Checklist
+              <CheckSquare className="w-4 h-4 shrink-0 text-[#DA291C]" />
+              Daily System
             </button>
 
             {/* tab: News Feed */}
@@ -952,6 +982,18 @@ export default function App() {
             transition={{ duration: 0.15, ease: "easeInOut" }}
             id="tab-grid-viewport"
           >
+            {activeTab === "dashboard" && (
+              <DashboardPanel
+                appData={appData}
+                currentSession={session}
+                onTabChange={(tab) => {
+                  setActiveTab(tab);
+                  document.getElementById("tabs-ribbon-bar")?.scrollIntoView({ behavior: "smooth" });
+                }}
+                onOpenVideoHub={() => setIsVideoHubOpen(true)}
+              />
+            )}
+
             {activeTab === "procedures" && (
               <ProceduresPanel
                 procedures={appData.procedures}
@@ -971,11 +1013,12 @@ export default function App() {
             )}
 
             {activeTab === "checklist" && (
-              <ChecklistsPanel
+              <DailySystemPanel
                 checklist={appData.checklist}
                 currentSession={session}
                 activeSelectedChecklist={activeSelectedChecklist}
                 onSave={saveChecklist}
+                onOpenVideoHub={() => setIsVideoHubOpen(true)}
               />
             )}
 
@@ -1010,6 +1053,16 @@ export default function App() {
           <span>OPERATOR PORTAL • SECURE OFFLINE CLOUD RECOVERY • VERSION 2.4.1-STABLE</span>
         </div>
       </footer>
+
+      {session && (
+        <VideoUploadSheet
+          isOpen={isVideoHubOpen}
+          onClose={() => setIsVideoHubOpen(false)}
+          videos={appData.videos || []}
+          currentSession={session}
+          onSaveVideos={saveVideos}
+        />
+      )}
 
     </div>
   );
