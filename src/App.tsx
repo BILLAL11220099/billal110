@@ -130,7 +130,14 @@ function parseCollections(
         uploadedBy: data.uploadedBy || "System Sync",
         uploadedRole: data.uploadedRole || "Crew",
         timestamp: data.timestamp || new Date().toISOString(),
-        url: data.url || undefined
+        url: data.url || undefined,
+        downloadUrl: data.downloadUrl || undefined,
+        thumbnail: data.thumbnail || undefined,
+        status: data.status || "Ready",
+        progress: data.progress || 100,
+        views: data.views || 0,
+        description: data.description || "",
+        category: data.category || "General",
       });
     }
   });
@@ -402,7 +409,14 @@ export default function App() {
                   uploadedBy: data.uploadedBy || "System Sync",
                   uploadedRole: data.uploadedRole || "Crew",
                   timestamp: data.timestamp || new Date().toISOString(),
-                  url: data.url || undefined
+                  url: data.url || undefined,
+                  downloadUrl: data.downloadUrl || undefined,
+                  thumbnail: data.thumbnail || undefined,
+                  status: data.status || "Ready",
+                  progress: data.progress || 100,
+                  views: data.views || 0,
+                  description: data.description || "",
+                  category: data.category || "General",
                 });
               }
             });

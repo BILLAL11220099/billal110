@@ -47,7 +47,7 @@ export default function VideoFeed({ videos, onPlayVideo, searchQuery, activeCate
                 </div>
               )}
               <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded">
-                Video
+                {(vid as any).status === "Converting" ? `Processing ${(vid as any).progress || 0}%` : "Video"}
               </div>
             </div>
             <div className="flex gap-3 px-1">

@@ -24,13 +24,24 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const validateFile = (file: File) => {
+    if (file.size > 500 * 1024 * 1024) {
+      setErrorMsg("File exceeds 500MB maximum size limit.");
+      return false;
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExts = ['mp4', 'mov', 'avi', 'webm', 'mkv'];
+    if (!validExts.includes(ext) && !file.type.startsWith('video/')) {
+      setErrorMsg("Invalid file format. Supported: MP4, MOV, AVI, WEBM, MKV");
+      return false;
+    }
+    return true;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 500 * 1024 * 1024) {
-        setErrorMsg("File exceeds 500MB maximum size limit.");
-        return;
-      }
+      if (!validateFile(file)) return;
       setSelectedFile(file);
       setTitle(file.name.replace(/\.[^/.]+$/, ""));
       setErrorMsg("");
@@ -43,10 +54,7 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     const dt = e.dataTransfer;
     if (dt.files && dt.files[0]) {
       const file = dt.files[0];
-      if (file.size > 500 * 1024 * 1024) {
-        setErrorMsg("File exceeds 500MB maximum size limit.");
-        return;
-      }
+      if (!validateFile(file)) return;
       setSelectedFile(file);
       setTitle(file.name.replace(/\.[^/.]+$/, ""));
       setErrorMsg("");
