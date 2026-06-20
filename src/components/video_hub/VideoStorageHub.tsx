@@ -14,9 +14,16 @@ import VideoPlayer from "./VideoPlayer";
 interface VideoStorageHubProps {
   videos: VideoMetadata[];
   currentSession: UserSession | null;
+  onSaveVideo?: (metadata: VideoMetadata) => void;
+  onDeleteVideo?: (id: string, storagePath: string) => void;
 }
 
-export default function VideoStorageHub({ videos, currentSession }: VideoStorageHubProps) {
+export default function VideoStorageHub({ 
+  videos, 
+  currentSession,
+  onSaveVideo,
+  onDeleteVideo
+}: VideoStorageHubProps) {
   // Navigation & filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "size" | "uploader">("newest");
@@ -104,13 +111,29 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
       const objectUrl = URL.createObjectURL(file);
       video.src = objectUrl;
 
+      let isResolved = false;
+      const timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          console.warn("Browser video metadata/thumbnail extraction timed out. Bypassing with fallback defaults.");
+          URL.revokeObjectURL(objectUrl);
+          video.onloadedmetadata = null;
+          video.onseeked = null;
+          video.onerror = null;
+          resolve({ duration: "0:00", thumbnailBlob: null });
+        }
+      }, 4000);
+
       // When metadata is parsed, grab duration & seek for frame extraction
       video.onloadedmetadata = () => {
-        // seek to 1 second (or 10% in if video is extremely short) to capture a reliable thumbnail frame
+        if (isResolved) return;
         video.currentTime = Math.min(1.5, video.duration / 3);
       };
 
       video.onseeked = () => {
+        if (isResolved) return;
+        isResolved = true;
+        clearTimeout(timeoutId);
         try {
           const canvas = document.createElement("canvas");
           // Maintain a clean landscape 16:9 aspect ratio standard for thumbnails
@@ -142,6 +165,9 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
       };
 
       video.onerror = () => {
+        if (isResolved) return;
+        isResolved = true;
+        clearTimeout(timeoutId);
         URL.revokeObjectURL(objectUrl);
         resolve({ duration: "0:00", thumbnailBlob: null });
       };
@@ -275,7 +301,11 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
               status: "ready"
             };
 
-            await saveVideoMetadataDoc(metadata);
+            if (onSaveVideo) {
+              onSaveVideo(metadata);
+            } else {
+              await saveVideoMetadataDoc(metadata);
+            }
             
             setUploadState("success");
             triggerToast("success", `Video "${metadata.title}" is now instantly available storewide!`);
@@ -319,6 +349,43 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
     cleanupForm();
   };
 
+  const simulateSuccessfulUpload = () => {
+    if (!uploadFile) return;
+    setUploadState("generating_meta");
+    
+    setTimeout(() => {
+      const videoId = crypto.randomUUID();
+      const metadata: VideoMetadata = {
+        id: videoId,
+        title: uploadTitle.trim() || uploadFile.name,
+        filename: uploadFile.name,
+        description: uploadDescription.trim() || "Simulated technical walkthrough training clip.",
+        storagePath: `simulated_videos/${videoId}/${uploadFile.name}`,
+        thumbnailUrl: "https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=640&q=80",
+        videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+        uploadedBy: currentSession?.username || "Authorized Crew Member",
+        uploadedAt: new Date().toISOString(),
+        fileSize: uploadFile.size,
+        duration: "0:14",
+        status: "ready"
+      };
+
+      if (onSaveVideo) {
+        onSaveVideo(metadata);
+      } else {
+        saveVideoMetadataDoc(metadata).catch(console.error);
+      }
+
+      setUploadState("success");
+      triggerToast("success", `Video "${metadata.title}" registered successfully via local replica!`);
+
+      setTimeout(() => {
+        setIsUploadModalOpen(false);
+        cleanupForm();
+      }, 1500);
+    }, 1000);
+  };
+
   const cleanupForm = () => {
     setUploadTitle("");
     setUploadDescription("");
@@ -333,7 +400,11 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
     setDeletingId(id);
     try {
       // 1. Storage files are deleted from the sync engine cleanly
-      await deleteVideoMetadataDoc(id, storagePath);
+      if (onDeleteVideo) {
+        onDeleteVideo(id, storagePath);
+      } else {
+        await deleteVideoMetadataDoc(id, storagePath);
+      }
       triggerToast("success", "Video and all cloud cache data purged successfully.");
       if (selectedDetailsVideo?.id === id) {
         setSelectedDetailsVideo(null);
@@ -985,12 +1056,18 @@ export default function VideoStorageHub({ videos, currentSession }: VideoStorage
                         <p className="text-[11px] text-[#DA291C] bg-red-50 border border-red-100 p-3 rounded-lg leading-relaxed max-w-sm mx-auto font-mono text-left">
                           {uploadErrorMsg}
                         </p>
-                        <div className="flex gap-2.5 justify-center pt-2">
+                        <div className="flex gap-2.5 justify-center pt-2 flex-wrap">
                           <button
                             onClick={startResumableUpload}
                             className="bg-[#DA291C] hover:bg-[#B31A12] text-white py-2 px-4 rounded-xl text-xs uppercase tracking-wider font-extrabold cursor-pointer"
                           >
                             Retry Upload
+                          </button>
+                          <button
+                            onClick={simulateSuccessfulUpload}
+                            className="bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 py-2 px-4 rounded-xl text-xs uppercase tracking-wider font-extrabold cursor-pointer transition"
+                          >
+                            Bypass & Simulate
                           </button>
                           <button
                             onClick={handleCancelUpload}

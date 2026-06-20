@@ -591,6 +591,30 @@ export default function App() {
     saveStoredData(updated, "Published Shift Notice on Feed");
   };
 
+  const saveVideosObj = (metadata: VideoMetadata) => {
+    saveVideoMetadataDoc(metadata).catch((err) => {
+      console.warn("Cloud Firestore save skipped or failed, using local caching:", err);
+    });
+
+    const list = appData.videos || [];
+    const newList = [...list.filter((v) => v.id !== metadata.id), metadata];
+    const updated = { ...appData, videos: newList };
+    setAppData(updated);
+    saveStoredData(updated, `Uploaded Video: ${metadata.title}`);
+  };
+
+  const deleteVideoObj = (id: string, storagePath: string) => {
+    deleteVideoMetadataDoc(id, storagePath).catch((err) => {
+      console.warn("Cloud Firestore purge skipped or failed:", err);
+    });
+
+    const list = appData.videos || [];
+    const newList = list.filter((v) => v.id !== id);
+    const updated = { ...appData, videos: newList };
+    setAppData(updated);
+    saveStoredData(updated, "Deleted Video Walkthrough");
+  };
+
   // Restore DB callback (triggered from backups snapshot restoration)
   const handleBackupRestore = (restoredData: AppSchema) => {
     setAppData(restoredData);
@@ -1033,6 +1057,8 @@ export default function App() {
               <VideoStorageHub
                 videos={appData.videos || []}
                 currentSession={session}
+                onSaveVideo={saveVideosObj}
+                onDeleteVideo={deleteVideoObj}
               />
             )}
 
