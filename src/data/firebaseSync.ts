@@ -13,32 +13,9 @@ import {
   query,
   limit
 } from "firebase/firestore";
-import { getStorage, ref, deleteObject } from "firebase/storage";
-import { db, storage, handleFirestoreError, OperationType } from "./firebase";
-import { AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost, VideoMetadata } from "../types";
+import { db, handleFirestoreError, OperationType } from "./firebase";
+import { AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost } from "../types";
 import { initialAppData } from "./mockDefaults";
-
-export const saveVideoMetadataDoc = async (item: VideoMetadata): Promise<void> => {
-  const path = `videos/${item.id}`;
-  console.log(`[Firestore Metadata Write] Preparing dry/wet write to Firestore document path: "${path}" for video: "${item.title}"`, item);
-  try {
-    await setDoc(doc(db, "videos", item.id), sanitizeForFirestore(item));
-    console.log(`[Firestore Metadata Write SUCCESS] Successfully committed document to path: "${path}"`);
-  } catch (error) {
-    console.error(`[Firestore Metadata Write ERROR] Failed to write document to path: "${path}":`, error);
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
-};
-
-export async function deleteVideoMetadataDoc(id: string, storagePath: string): Promise<void> {
-  const path = `videos/${id}`;
-  try {
-    await deleteDoc(doc(db, "videos", id));
-    await deleteObject(ref(storage, storagePath));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
-}
 
 // Collection References
 const proceduresCol = collection(db, "procedures");

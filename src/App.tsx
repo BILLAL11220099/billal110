@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost, VideoMetadata } from "./types";
+import { UserSession, AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost } from "./types";
 import { getStoredData, saveStoredData, resetDatabaseToDefault } from "./data/storageEngine";
 import { collection, getDocs, onSnapshot } from "firebase/firestore";
 import { db, auth, handleFirestoreError, OperationType } from "./data/firebase";
@@ -20,9 +20,7 @@ import {
   deleteChecklistItemDoc,
   saveNewsFeedPostDoc,
   deleteNewsFeedPostDoc,
-  bulkWriteSchemaSnapshot,
-  saveVideoMetadataDoc,
-  deleteVideoMetadataDoc
+  bulkWriteSchemaSnapshot
 } from "./data/firebaseSync";
 import Login from "./components/Login";
 import SearchGlobal from "./components/SearchGlobal";
@@ -32,19 +30,17 @@ import InventoryPanel from "./components/InventoryPanel";
 import DailySystemPanel from "./components/DailySystemPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
-import VideoStorageHub from "./components/video_hub/VideoStorageHub";
 
 import {
   LayoutDashboard, BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
-  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw, Film
+  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw
 } from "lucide-react";
 
 function parseCollections(
   procDocs: any[],
   invDocs: any[],
   chkDocs: any[],
-  feedDocs: any[],
-  videoDocs: any[]
+  feedDocs: any[]
 ): AppSchema {
   const proceduresList: CompanyProcedure[] = [];
   procDocs.forEach((docSnap) => {
@@ -117,33 +113,11 @@ function parseCollections(
   });
   feedList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-  const videosList: VideoMetadata[] = [];
-  videoDocs.forEach((docSnap) => {
-    const data = docSnap.data();
-    if (data) {
-      videosList.push({
-        id: data.id || docSnap.id,
-        title: data.title || "Untitled Video",
-        filename: data.filename || "",
-        description: data.description || "",
-        storagePath: data.storagePath || "",
-        thumbnailUrl: data.thumbnailUrl || "",
-        videoUrl: data.videoUrl || "",
-        uploadedBy: data.uploadedBy || "System Sync",
-        uploadedAt: data.uploadedAt || new Date().toISOString(),
-        fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
-        duration: data.duration || "0:00",
-        status: data.status || "ready",
-      });
-    }
-  });
-
   return {
     procedures: proceduresList,
     inventory: inventoryList,
     checklist: checklistList,
-    feed: feedList,
-    videos: videosList
+    feed: feedList
   };
 }
 
@@ -158,7 +132,7 @@ export default function App() {
   });
 
   const [appData, setAppData] = useState<AppSchema>(() => getStoredData());
-  const [activeTab, setActiveTab] = useState<"dashboard" | "procedures" | "inventory" | "checklist" | "feed" | "videos" | "backups">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "procedures" | "inventory" | "checklist" | "feed" | "backups">("dashboard");
   
   // Real-time Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -171,8 +145,7 @@ export default function App() {
     procedures: false,
     inventory: false,
     checklist: false,
-    feed: false,
-    videos: false
+    feed: false
   });
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
@@ -193,14 +166,13 @@ export default function App() {
   useEffect(() => {
     const syncTimeout = setTimeout(() => {
       setInitialSyncProgress((prev) => {
-        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed || !prev.videos) {
+        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed) {
           console.warn("Initial Cloud connection took longer than 3.5s. Falling back to local replication cache.");
           return {
             procedures: true,
             inventory: true,
             checklist: true,
-            feed: true,
-            videos: true
+            feed: true
           };
         }
         return prev;
@@ -387,53 +359,7 @@ export default function App() {
         );
         unsubs.push(unsubFeed);
 
-        // 5. Subscribe to videos
-        const unsubVideos = onSnapshot(
-          collection(db, "videos"),
-          (snapshot) => {
-            const list: VideoMetadata[] = [];
-            snapshot.docs.forEach((docSnap) => {
-              const data = docSnap.data();
-              if (data) {
-                // Support mapping from both client-side and server-side model formats
-                const rawStatus = String(data.status || "ready").toLowerCase();
-                let mappedStatus: "uploading" | "processing" | "ready" = "ready";
-                if (rawStatus === "uploading") {
-                  mappedStatus = "uploading";
-                } else if (rawStatus === "converting" || rawStatus === "processing") {
-                  mappedStatus = "processing";
-                }
-
-                list.push({
-                  id: data.id || docSnap.id,
-                  title: data.title || "Untitled Video",
-                  filename: data.filename || data.fileName || "",
-                  description: data.description || "",
-                  storagePath: data.storagePath || "",
-                  thumbnailUrl: data.thumbnailUrl || data.thumbnail || "https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=640&q=80",
-                  videoUrl: data.videoUrl || data.url || "",
-                  uploadedBy: data.uploadedBy || "System Sync",
-                  uploadedAt: data.uploadedAt || data.timestamp || new Date().toISOString(),
-                  fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
-                  duration: data.duration || "0:00",
-                  status: mappedStatus,
-                });
-              }
-            });
-            updateCollectionState("videos", list);
-            setSyncStatus("connected");
-          },
-          (error) => {
-            console.error("Videos listener error:", error);
-            try {
-              handleFirestoreError(error, OperationType.GET, "videos");
-            } catch (errInfo) {
-              console.warn("Videos cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
-            }
-            setSyncStatus("error");
-          }
-        );
-        unsubs.push(unsubVideos);
+        // 5. Subscribe to videos was removed
 
       } catch (err) {
         console.error("Realtime subscription error:", err);
@@ -442,8 +368,7 @@ export default function App() {
           procedures: true,
           inventory: true,
           checklist: true,
-          feed: true,
-          videos: true
+          feed: true
         });
       }
     };
@@ -461,20 +386,18 @@ export default function App() {
     setIsForceSyncing(true);
     setSyncStatus("connecting");
     try {
-      const [procSnap, invSnap, chkSnap, feedSnap, vSnap] = await Promise.all([
+      const [procSnap, invSnap, chkSnap, feedSnap] = await Promise.all([
         getDocs(collection(db, "procedures")),
         getDocs(collection(db, "inventory")),
         getDocs(collection(db, "checklist")),
-        getDocs(collection(db, "feed")),
-        getDocs(collection(db, "videos"))
+        getDocs(collection(db, "feed"))
       ]);
 
       const updated = parseCollections(
         procSnap.docs,
         invSnap.docs,
         chkSnap.docs,
-        feedSnap.docs,
-        vSnap.docs
+        feedSnap.docs
       );
 
       setAppData(updated);
@@ -489,8 +412,7 @@ export default function App() {
         procedures: true,
         inventory: true,
         checklist: true,
-        feed: true,
-        videos: true
+        feed: true
       });
     } catch (err) {
       console.error("Force sync from cloud error:", err);
@@ -598,30 +520,6 @@ export default function App() {
     const updated = { ...appData, feed: newList };
     setAppData(updated);
     saveStoredData(updated, "Published Shift Notice on Feed");
-  };
-
-  const saveVideosObj = (metadata: VideoMetadata) => {
-    saveVideoMetadataDoc(metadata).catch((err) => {
-      console.warn("Cloud Firestore save skipped or failed, using local caching:", err);
-    });
-
-    const list = appData.videos || [];
-    const newList = [...list.filter((v) => v.id !== metadata.id), metadata];
-    const updated = { ...appData, videos: newList };
-    setAppData(updated);
-    saveStoredData(updated, `Uploaded Video: ${metadata.title}`);
-  };
-
-  const deleteVideoObj = (id: string, storagePath: string) => {
-    deleteVideoMetadataDoc(id, storagePath).catch((err) => {
-      console.warn("Cloud Firestore purge skipped or failed:", err);
-    });
-
-    const list = appData.videos || [];
-    const newList = list.filter((v) => v.id !== id);
-    const updated = { ...appData, videos: newList };
-    setAppData(updated);
-    saveStoredData(updated, "Deleted Video Walkthrough");
   };
 
   // Restore DB callback (triggered from backups snapshot restoration)
@@ -968,21 +866,7 @@ export default function App() {
               News Feed
             </button>
 
-            {/* tab: Video Storage Hub */}
-            <button
-              id="tab-videos-trigger"
-              onClick={() => {
-                setActiveTab("videos");
-              }}
-              className={`flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === "videos"
-                  ? "bg-amber-50 text-amber-850 border border-[#DA291C]/30 shadow-xs"
-                  : "bg-transparent border border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800"
-              }`}
-            >
-              <Film className="w-4 h-4 shrink-0 text-[#DA291C]" />
-              Video Storage Hub
-            </button>
+
 
             {/* tab: Backups Security */}
             <button
@@ -1062,14 +946,7 @@ export default function App() {
               />
             )}
 
-            {activeTab === "videos" && (
-              <VideoStorageHub
-                videos={appData.videos || []}
-                currentSession={session}
-                onSaveVideo={saveVideosObj}
-                onDeleteVideo={deleteVideoObj}
-              />
-            )}
+
 
             {activeTab === "backups" && (
               <BackupsPanel
