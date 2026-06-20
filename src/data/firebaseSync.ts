@@ -20,9 +20,12 @@ import { initialAppData } from "./mockDefaults";
 
 export const saveVideoMetadataDoc = async (item: VideoMetadata): Promise<void> => {
   const path = `videos/${item.id}`;
+  console.log(`[Firestore Metadata Write] Preparing dry/wet write to Firestore document path: "${path}" for video: "${item.title}"`, item);
   try {
     await setDoc(doc(db, "videos", item.id), sanitizeForFirestore(item));
+    console.log(`[Firestore Metadata Write SUCCESS] Successfully committed document to path: "${path}"`);
   } catch (error) {
+    console.error(`[Firestore Metadata Write ERROR] Failed to write document to path: "${path}":`, error);
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 };

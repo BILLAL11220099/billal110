@@ -88,7 +88,7 @@ export interface VideoMetadata {
   uploadedAt: string;
   fileSize: number;
   duration: string;
-  status: "processing" | "ready";
+  status: "uploading" | "processing" | "ready";
 }
 
 export interface BackupSnapshot {

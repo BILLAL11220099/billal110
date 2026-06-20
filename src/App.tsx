@@ -395,19 +395,28 @@ export default function App() {
             snapshot.docs.forEach((docSnap) => {
               const data = docSnap.data();
               if (data) {
+                // Support mapping from both client-side and server-side model formats
+                const rawStatus = String(data.status || "ready").toLowerCase();
+                let mappedStatus: "uploading" | "processing" | "ready" = "ready";
+                if (rawStatus === "uploading") {
+                  mappedStatus = "uploading";
+                } else if (rawStatus === "converting" || rawStatus === "processing") {
+                  mappedStatus = "processing";
+                }
+
                 list.push({
                   id: data.id || docSnap.id,
                   title: data.title || "Untitled Video",
-                  filename: data.filename || "",
+                  filename: data.filename || data.fileName || "",
                   description: data.description || "",
                   storagePath: data.storagePath || "",
-                  thumbnailUrl: data.thumbnailUrl || "",
-                  videoUrl: data.videoUrl || "",
+                  thumbnailUrl: data.thumbnailUrl || data.thumbnail || "https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=640&q=80",
+                  videoUrl: data.videoUrl || data.url || "",
                   uploadedBy: data.uploadedBy || "System Sync",
-                  uploadedAt: data.uploadedAt || new Date().toISOString(),
+                  uploadedAt: data.uploadedAt || data.timestamp || new Date().toISOString(),
                   fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
                   duration: data.duration || "0:00",
-                  status: data.status || "ready",
+                  status: mappedStatus,
                 });
               }
             });

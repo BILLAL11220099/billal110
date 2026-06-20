@@ -6,8 +6,7 @@ import {
   HardDrive, User, Info, FolderPlus, PlayCircle, Eye, ChevronRight
 } from "lucide-react";
 import { VideoMetadata, UserSession } from "../../types";
-import { ref, uploadBytesResumable, getDownloadURL, getStorage, uploadBytes } from "firebase/storage";
-import { db, storage } from "../../data/firebase";
+import { db } from "../../data/firebase";
 import { saveVideoMetadataDoc, deleteVideoMetadataDoc } from "../../data/firebaseSync";
 import VideoPlayer from "./VideoPlayer";
 
@@ -56,6 +55,9 @@ export default function VideoStorageHub({
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isPausedRef = useRef(false);
+  const isCancelledRef = useRef(false);
+  const currentChunkIndexRef = useRef(0);
 
   // Trigger custom notification alerts
   const triggerToast = (type: "success" | "error" | "info", msg: string) => {
@@ -220,115 +222,201 @@ export default function VideoStorageHub({
   const startResumableUpload = async () => {
     if (!uploadFile) return;
 
+    console.log(`[Chunked Upload] Initializing process for file: "${uploadFile.name}" (${uploadFile.size} bytes)`);
     setUploadState("generating_meta");
     setUploadProgress(0);
     setIsPaused(false);
+    
+    isPausedRef.current = false;
+    isCancelledRef.current = false;
+    currentChunkIndexRef.current = 0;
+
+    let duration = "0:00";
+    let thumbnailBlob: Blob | null = null;
 
     try {
       // 1. Process Metatags & generate live Canvas thumbnail in the browser
-      const { duration, thumbnailBlob } = await processVideoMetadataInBrowser(uploadFile);
-      
-      setUploadState("uploading");
-      const videoId = crypto.randomUUID();
-      const timestamp = Date.now();
-      
-      // Filename prevention of duplicates
-      const safeFilename = `${timestamp}_${uploadFile.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
-      const videoStorageRef = ref(storage, `videos/${videoId}/${safeFilename}`);
+      console.log(`[Chunked Upload] Extracting video duration and compiling thumbnail...`);
+      const meta = await processVideoMetadataInBrowser(uploadFile);
+      duration = meta.duration;
+      thumbnailBlob = meta.thumbnailBlob;
+      console.log(`[Chunked Upload] Duration: "${duration}". Thumbnail: ${!!thumbnailBlob}`);
+    } catch (metaErr: any) {
+      console.warn("Metadata decoding timed out or failed in this browser, using defaults.", metaErr);
+    }
 
-      // 2. Setup Resumable Upload Task
-      const task = uploadBytesResumable(videoStorageRef, uploadFile);
-      setUploadTask(task);
+    if (isCancelledRef.current) return;
 
-      let startTime = Date.now();
-      let lastTransferred = 0;
+    setUploadState("uploading");
+    
+    const videoId = crypto.randomUUID();
+    const chunkSize = 5 * 1024 * 1024; // 5MB chunks
+    const totalChunks = Math.ceil(uploadFile.size / chunkSize);
+    
+    let startTime = Date.now();
+    let lastTransferred = 0;
 
-      task.on(
-        "state_changed",
-        (snapshot) => {
-          const progressPercent = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+    const uploadChunksLoop = async () => {
+      while (currentChunkIndexRef.current < totalChunks) {
+        if (isCancelledRef.current) {
+          console.log("[Chunked Upload] Upload cancelled.");
+          return;
+        }
+
+        if (isPausedRef.current) {
+          console.log(`[Chunked Upload] Paused at chunk index ${currentChunkIndexRef.current}/${totalChunks}`);
+          return;
+        }
+
+        const startByte = currentChunkIndexRef.current * chunkSize;
+        const endByte = Math.min(startByte + chunkSize, uploadFile.size);
+        const chunkBlob = uploadFile.slice(startByte, endByte);
+        
+        console.log(`[Chunked Upload] Transferring chunk ${currentChunkIndexRef.current + 1}/${totalChunks} (bytes ${startByte}-${endByte})...`);
+
+        try {
+          const formData = new FormData();
+          formData.append("id", videoId);
+          formData.append("chunkIndex", String(currentChunkIndexRef.current));
+          formData.append("totalChunks", String(totalChunks));
+          formData.append("chunk", chunkBlob);
+
+          const response = await fetch("/api/videos/upload_chunk", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            throw new Error(`Server returned HTTP status ${response.status}`);
+          }
+
+          const resData = await response.json();
+          if (!resData.success) {
+            throw new Error(resData.error || "Chunk upload rejected by server.");
+          }
+
+          // Advance chunk
+          currentChunkIndexRef.current += 1;
+          const progressPercent = (currentChunkIndexRef.current / totalChunks) * 100;
           setUploadProgress(progressPercent);
 
-          // Speed & ETA calculations
+          // Update speed & ETA
           const currentTime = Date.now();
           const ellapsedTimeSecs = (currentTime - startTime) / 1000;
           if (ellapsedTimeSecs > 0.5) {
-            const bytesPerSec = (snapshot.bytesTransferred - lastTransferred) / ellapsedTimeSecs;
+            const transferredThisStep = currentChunkIndexRef.current * chunkSize;
+            const bytesPerSec = (transferredThisStep - lastTransferred) / ellapsedTimeSecs;
             const speedKb = bytesPerSec / 1024;
             setUploadSpeed(speedKb > 1024 ? `${(speedKb / 1024).toFixed(1)} MB/s` : `${Math.round(speedKb)} KB/s`);
             
-            const remainingBytes = snapshot.totalBytes - snapshot.bytesTransferred;
+            const remainingBytes = uploadFile.size - transferredThisStep;
             const etaVal = bytesPerSec > 0 ? Math.round(remainingBytes / bytesPerSec) : 0;
             setUploadEta(etaVal > 60 ? `${Math.floor(etaVal / 60)}m ${etaVal % 60}s` : `${etaVal}s`);
 
-            // Reset loop
             startTime = currentTime;
-            lastTransferred = snapshot.bytesTransferred;
+            lastTransferred = transferredThisStep;
           }
-        },
-        (error) => {
-          console.error("Video chunked transfer error:", error);
+
+        } catch (uploadErr: any) {
+          console.error(`[Chunked Upload ERROR] Chunk index ${currentChunkIndexRef.current} failed:`, uploadErr);
           setUploadState("error");
-          setUploadErrorMsg(error.message || "An interrupted connection or quota limit prevented the upload.");
-          triggerToast("error", `Upload failed: ${error.message}`);
-        },
-        async () => {
-          // Upload complete! Let's get secure playback public URLs
+          setUploadErrorMsg(`Chunk transfer failed: ${uploadErr.message || String(uploadErr)}. You can safely resume or retry.`);
+          return;
+        }
+      }
+
+      // Loop completed successfully! Finalize the upload
+      console.log("[Chunked Upload] Completed all chunks. Invoking finalize...");
+      setUploadState("generating_meta"); // Processing stage
+      
+      try {
+        const payload = {
+          id: videoId,
+          originalName: uploadFile.name,
+          title: uploadTitle.trim() || uploadFile.name,
+          description: uploadDescription.trim() || "No brief description provided.",
+          category: "General",
+          uploadedBy: currentSession?.username || "Authorized Crew Member",
+          uploadedRole: currentSession?.role || "Crew",
+          totalChunks,
+          size: uploadFile.size,
+          type: uploadFile.type,
+          duration // Pass duration we processed
+        };
+
+        const finalizeResponse = await fetch("/api/videos/upload_finalize", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!finalizeResponse.ok) {
+          throw new Error(`Server returned HTTP status ${finalizeResponse.status}`);
+        }
+
+        const finalizeResult = await finalizeResponse.json();
+        if (!finalizeResult.success) {
+          throw new Error(finalizeResult.error || "Finalize failed on the server.");
+        }
+
+        console.log("[Chunked Upload SUCCESS] Video compiled successfully on backend!");
+        
+        // If we also have thumbnail, we can put it there
+        if (thumbnailBlob) {
           try {
-            const videoUrl = await getDownloadURL(task.snapshot.ref);
-            let finalThumbnailUrl = "";
-
-            // Upload the generated thumbnail frame if successful
-            if (thumbnailBlob) {
-              const thumbRef = ref(storage, `videos/${videoId}/thumb.jpg`);
-              await uploadBytes(thumbRef, thumbnailBlob);
-              finalThumbnailUrl = await getDownloadURL(thumbRef);
-            }
-
-            // Assemble compliant database payload
-            const metadata: VideoMetadata = {
-              id: videoId,
-              title: uploadTitle.trim() || uploadFile.name,
-              filename: uploadFile.name,
-              description: uploadDescription.trim() || "No training walkthrough description provided.",
-              storagePath: videoStorageRef.fullPath,
-              thumbnailUrl: finalThumbnailUrl || "https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=640&q=80",
-              videoUrl: videoUrl,
-              uploadedBy: currentSession?.username || "Authorized Crew Member",
-              uploadedAt: new Date().toISOString(),
-              fileSize: uploadFile.size,
-              duration: duration,
-              status: "ready"
+            const reader = new FileReader();
+            reader.readAsDataURL(thumbnailBlob);
+            reader.onloadend = async () => {
+              const base64data = reader.result;
+              await fetch(`/api/videos/${videoId}/thumbnail`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ thumbnail: base64data })
+              }).catch(e => console.warn("Optional thumbnail upload skipped:", e));
             };
-
-            if (onSaveVideo) {
-              onSaveVideo(metadata);
-            } else {
-              await saveVideoMetadataDoc(metadata);
-            }
-            
-            setUploadState("success");
-            triggerToast("success", `Video "${metadata.title}" is now instantly available storewide!`);
-            
-            // Clean modal states
-            setTimeout(() => {
-              setIsUploadModalOpen(false);
-              cleanupForm();
-            }, 1500);
-
-          } catch (dbErr: any) {
-            console.error("Firestore serialization failure:", dbErr);
-            setUploadState("error");
-            setUploadErrorMsg("Database registration failed on public cluster.");
+          } catch (thumbErr) {
+            console.warn("Base64 thumbnail creation failed:", thumbErr);
           }
         }
-      );
 
-    } catch (metaErr: any) {
-      console.error("Metadata generation issue:", metaErr);
-      setUploadState("error");
-      setUploadErrorMsg("Failed to decode video container settings in this browser.");
-    }
+        setUploadState("success");
+        triggerToast("success", `Walkthrough "${payload.title}" registered successfully on cloud backend!`);
+
+        setTimeout(() => {
+          setIsUploadModalOpen(false);
+          cleanupForm();
+        }, 1500);
+
+      } catch (err: any) {
+        console.error("[Chunked Upload ERROR] Finalization failed:", err);
+        setUploadState("error");
+        setUploadErrorMsg("Failed compiling video walkthrough: " + (err.message || String(err)));
+      }
+    };
+
+    // Instantiate custom task object for the UI cancel/pause button bindings
+    const task = {
+      pause: () => {
+        isPausedRef.current = true;
+        setIsPaused(true);
+      },
+      resume: () => {
+        isPausedRef.current = false;
+        setIsPaused(false);
+        uploadChunksLoop();
+      },
+      cancel: () => {
+        isCancelledRef.current = true;
+        cleanupForm();
+      }
+    };
+
+    setUploadTask(task);
+    
+    // Start transmission
+    uploadChunksLoop();
   };
 
   const handlePauseResume = () => {
@@ -351,6 +439,7 @@ export default function VideoStorageHub({
 
   const simulateSuccessfulUpload = () => {
     if (!uploadFile) return;
+    console.log(`[Firebase Storage Put SIMULATED] Initializing simulation for file: "${uploadFile.name}" (${uploadFile.size} bytes)`);
     setUploadState("generating_meta");
     
     setTimeout(() => {
@@ -370,10 +459,16 @@ export default function VideoStorageHub({
         status: "ready"
       };
 
+      console.log(`[Firestore Metadata Write SIMULATED] Registering video metadata record for ID: "${videoId}"...`, metadata);
+
       if (onSaveVideo) {
+        console.log(`[Firestore Metadata Write SIMULATED] Delegating metadata save to parent context...`);
         onSaveVideo(metadata);
       } else {
-        saveVideoMetadataDoc(metadata).catch(console.error);
+        console.log(`[Firestore Metadata Write SIMULATED] Calling local fallback 'saveVideoMetadataDoc' write...`);
+        saveVideoMetadataDoc(metadata).catch((err) => {
+          console.error(`[Firestore Metadata Write ERROR SIMULATED] Direct database write failed:`, err);
+        });
       }
 
       setUploadState("success");
@@ -603,6 +698,7 @@ export default function VideoStorageHub({
                 <option value="all">All statuses</option>
                 <option value="ready">Ready (Active)</option>
                 <option value="processing">Processing</option>
+                <option value="uploading">Uploading</option>
               </select>
             </div>
 
@@ -664,13 +760,18 @@ export default function VideoStorageHub({
                       </div>
 
                       {/* Video status tag */}
-                      {video.status === "processing" ? (
-                        <div className="absolute top-3 left-3 bg-amber-500 text-white font-black text-[9px] uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1 shadow-sm">
+                      {video.status === "uploading" ? (
+                        <div className="absolute top-3 left-3 bg-blue-500 text-white font-black text-[9px] uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1 shadow-sm z-10 animate-pulse">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Uploading</span>
+                        </div>
+                      ) : video.status === "processing" ? (
+                        <div className="absolute top-3 left-3 bg-amber-500 text-white font-black text-[9px] uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1 shadow-sm z-10">
                           <Loader2 className="w-3 h-3 animate-spin" />
                           <span>Processing</span>
                         </div>
                       ) : (
-                        <div className="absolute top-3 left-3 bg-emerald-500/90 text-white font-black text-[9px] uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1 shadow-sm">
+                        <div className="absolute top-3 left-3 bg-emerald-500/90 text-white font-black text-[9px] uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1 shadow-sm z-10">
                           <Check className="w-3 h-3 stroke-[3px]" />
                           <span>Ready</span>
                         </div>
@@ -977,7 +1078,85 @@ export default function VideoStorageHub({
 
                 {/* Processing and Upload progress indicators */}
                 {(uploadState === "generating_meta" || uploadState === "uploading" || uploadState === "success" || uploadState === "error") && (
-                  <div className="py-8 text-center flex flex-col items-center justify-center space-y-5">
+                  <div className="py-8 text-center flex flex-col items-center justify-center space-y-5 w-full">
+                    
+                    {/* Visual 3-State Progress Stepper: Uploading -> Processing -> Ready */}
+                    <div className="w-full max-w-sm mx-auto mb-6 flex items-center justify-between text-left relative px-2">
+                      {/* Connection Line */}
+                      <div className="absolute top-4 left-8 right-8 h-0.5 bg-slate-250 -z-0" style={{ width: 'calc(100% - 64px)' }} />
+                      <div 
+                        className="absolute top-4 left-8 h-0.5 bg-[#DA291C] transition-all duration-500 -z-0"
+                        style={{
+                          width: uploadState === "uploading" 
+                            ? "0%" 
+                            : uploadState === "generating_meta"
+                            ? "50%"
+                            : uploadState === "success"
+                            ? "100%"
+                            : "0%"
+                        }}
+                      />
+
+                      {/* Step 1: Uploading */}
+                      <div className="flex flex-col items-center text-center relative z-10">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs transition-colors duration-300 ${
+                          uploadState === "uploading"
+                            ? "bg-[#DA291C] text-white ring-4 ring-[#DA291C]/20"
+                            : (uploadState === "generating_meta" || uploadState === "success")
+                            ? "bg-emerald-500 text-white"
+                            : "bg-slate-200 text-slate-500"
+                        }`}>
+                          {(uploadState === "generating_meta" || uploadState === "success") ? (
+                            <Check className="w-4 h-4 stroke-[3px]" />
+                          ) : (
+                            "1"
+                          )}
+                        </div>
+                        <span className={`text-[10px] font-black uppercase mt-1.5 tracking-wider ${
+                          uploadState === "uploading" ? "text-[#DA291C]" : "text-slate-400"
+                        }`}>Uploading</span>
+                      </div>
+
+                      {/* Step 2: Processing */}
+                      <div className="flex flex-col items-center text-center relative z-10">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs transition-colors duration-300 ${
+                          uploadState === "generating_meta"
+                            ? "bg-[#DA291C] text-white ring-4 ring-[#DA291C]/20"
+                            : uploadState === "success"
+                            ? "bg-emerald-500 text-white"
+                            : "bg-slate-200 text-slate-500"
+                        }`}>
+                          {uploadState === "success" ? (
+                            <Check className="w-4 h-4 stroke-[3px]" />
+                          ) : uploadState === "generating_meta" ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            "2"
+                          )}
+                        </div>
+                        <span className={`text-[10px] font-black uppercase mt-1.5 tracking-wider ${
+                          uploadState === "generating_meta" ? "text-amber-500" : "text-slate-400"
+                        }`}>Processing</span>
+                      </div>
+
+                      {/* Step 3: Ready */}
+                      <div className="flex flex-col items-center text-center relative z-10">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs transition-colors duration-300 ${
+                          uploadState === "success"
+                            ? "bg-emerald-500 text-white ring-4 ring-emerald-500/20"
+                            : "bg-slate-200 text-slate-500"
+                        }`}>
+                          {uploadState === "success" ? (
+                            <Check className="w-4 h-4 stroke-[3px]" />
+                          ) : (
+                            "3"
+                          )}
+                        </div>
+                        <span className={`text-[10px] font-black uppercase mt-1.5 tracking-wider ${
+                          uploadState === "success" ? "text-emerald-500" : "text-slate-400"
+                        }`}>Ready</span>
+                      </div>
+                    </div>
                     
                     {uploadState === "generating_meta" && (
                       <>
