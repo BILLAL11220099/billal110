@@ -1,7 +1,8 @@
 import React, { useState, useRef } from "react";
 import { Upload, X, Film, AlertCircle, CheckCircle, Pause, Play, Plus } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL, UploadTask } from "firebase/storage";
-import { storage } from "../../data/firebase";
+import { doc, setDoc } from "firebase/firestore";
+import { storage, db } from "../../data/firebase";
 import { VideoMetadata, UserSession } from "../../types";
 
 interface UploadManagerProps {
@@ -71,54 +72,83 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     
     setStatus("uploading");
     
-    const formData = new FormData();
-    formData.append("video", selectedFile);
-    formData.append("title", title);
-    formData.append("description", description);
-    formData.append("category", category);
-    formData.append("uploadedBy", currentSession.username);
-    formData.append("uploadedRole", currentSession.role);
-    formData.append("id", "vid_" + Date.now());
-
-    const xhr = new XMLHttpRequest();
-    // Use a ref to store xhr if we want to support cancelling, but let's keep it simple
+    const videoId = "vid_" + Date.now();
+    const storageRef = ref(storage, `workstation/${videoId}/${selectedFile.name}`);
+    const task = uploadBytesResumable(storageRef, selectedFile);
     
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        const p = (e.loaded / e.total) * 100;
+    setUploadTask(task);
+    
+    task.on("state_changed", 
+      (snapshot) => {
+        const p = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
         setProgress(p);
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        setStatus("success");
-        setTimeout(() => {
-          onClose(); // Automatically close on success
-        }, 2000);
-      } else {
+        switch (snapshot.state) {
+          case 'paused':
+            setStatus("paused");
+            break;
+          case 'running':
+            setStatus("uploading");
+            break;
+        }
+      },
+      (error) => {
         setStatus("error");
+        setErrorMsg(error.message);
+      },
+      async () => {
+        setStatus("success");
         try {
-          const res = JSON.parse(xhr.responseText);
-          setErrorMsg(res.error || "Upload failed");
-        } catch {
-          setErrorMsg("Upload failed with status " + xhr.status);
+          const downloadURL = await getDownloadURL(task.snapshot.ref);
+          
+          // Generate SVG thumbnail
+          const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
+          const idx = Math.abs(title.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length;
+          const baseColor = colors[idx];
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</text></svg>`;
+          const thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+          const newMeta: VideoMetadata = {
+            id: videoId,
+            title,
+            description,
+            category,
+            fileName: selectedFile.name,
+            fileSize: selectedFile.size,
+            fileType: selectedFile.type,
+            uploadedBy: currentSession.username,
+            uploadedRole: currentSession.role,
+            timestamp: new Date().toISOString(),
+            url: downloadURL,
+            downloadUrl: downloadURL,
+            thumbnail: thumbnail,
+            status: "Ready",
+            progress: 100,
+            views: 0,
+            downloads: 0,
+            likes: 0,
+            likedBy: []
+          };
+          
+          await setDoc(doc(db, "videos", videoId), newMeta);
+
+          setTimeout(() => {
+            onClose(); // Automatically close on success
+          }, 2000);
+        } catch (err: any) {
+          setStatus("error");
+          setErrorMsg(err.message || "Failed to finalize upload metadata.");
         }
       }
-    });
-
-    xhr.addEventListener("error", () => {
-      setStatus("error");
-      setErrorMsg("Network error occurred during upload.");
-    });
-
-    xhr.open("POST", "/api/videos/upload", true);
-    xhr.send(formData);
+    );
   };
 
   const togglePause = () => {
-    // XMLHttpRequest doesn't support pause/resume natively. 
-    // We'll leave it as a no-op or hide the pause button.
+    if (!uploadTask) return;
+    if (status === "uploading") {
+      uploadTask.pause();
+    } else if (status === "paused") {
+      uploadTask.resume();
+    }
   };
 
   return (
