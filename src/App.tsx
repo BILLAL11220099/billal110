@@ -32,7 +32,7 @@ import InventoryPanel from "./components/InventoryPanel";
 import DailySystemPanel from "./components/DailySystemPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
-import VideoUploadSheet from "./components/VideoUploadSheet";
+import WorkstationApp from "./components/workstation/WorkstationApp";
 
 import {
   LayoutDashboard, BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
@@ -1055,7 +1055,7 @@ export default function App() {
       </footer>
 
       {session && (
-        <VideoUploadSheet
+        <WorkstationApp
           isOpen={isVideoHubOpen}
           onClose={() => setIsVideoHubOpen(false)}
           videos={appData.videos || []}
