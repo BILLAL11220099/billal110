@@ -73,7 +73,7 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     setStatus("uploading");
     
     const videoId = "vid_" + Date.now();
-    const chunkSize = 5 * 1024 * 1024; // 5MB chunks
+    const chunkSize = 512 * 1024; // 512KB chunks
     const totalChunks = Math.ceil(selectedFile.size / chunkSize);
     
     setStatus("uploading");
@@ -116,10 +116,10 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
       const chunk = selectedFile.slice(start, end);
       
       const formData = new FormData();
-      formData.append("chunk", chunk, "chunk_blob");
       formData.append("id", videoId);
       formData.append("chunkIndex", chunkIndex.toString());
       formData.append("totalChunks", totalChunks.toString());
+      formData.append("chunk", chunk, "chunk_blob");
       
       const xhr = new XMLHttpRequest();
       xhr.upload.addEventListener("progress", (e) => {
@@ -135,7 +135,8 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
           uploadChunk(chunkIndex + 1);
         } else {
           setStatus("error");
-          setErrorMsg("Failed on chunk " + chunkIndex);
+          console.error("Upload error text:", xhr.responseText);
+          setErrorMsg("Failed on chunk " + chunkIndex + " (Status " + xhr.status + "): " + xhr.responseText);
         }
       });
       
