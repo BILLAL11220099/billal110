@@ -22,32 +22,6 @@ const proceduresCol = collection(db, "procedures");
 const inventoryCol = collection(db, "inventory");
 const checklistCol = collection(db, "checklist");
 const feedCol = collection(db, "feed");
-const videosCol = collection(db, "videos");
-
-const DEFAULT_VIDEOS_SEED: VideoMetadata[] = [
-  {
-    id: "default_burger_guide",
-    title: "Double Cheeseburger Fast Assembly Guide",
-    fileName: "mcd_kitchen_double_prep.mp4",
-    fileSize: 18451200, // 18.4 MB
-    fileType: "video/mp4",
-    uploadedBy: "Business Manager",
-    uploadedRole: "Business Manager",
-    timestamp: "2026-06-15T09:30:00.000Z",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-  },
-  {
-    id: "default_safety_guide",
-    title: "Standard Handwashing & Hygiene Walkthrough",
-    fileName: "handwash_hygiene_training.mp4",
-    fileSize: 12100450, // 12.1 MB
-    fileType: "video/mp4",
-    uploadedBy: "Trainer",
-    uploadedRole: "Trainer",
-    timestamp: "2026-06-16T14:15:00.000Z",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-  }
-];
 
 /**
  * Checks if Firestore is currently empty, and if so, seeds it with initial default data
@@ -94,17 +68,6 @@ export async function seedFirestoreIfNeeded(): Promise<void> {
       const batch = writeBatch(db);
       initialAppData.feed.forEach((f) => {
         batch.set(doc(feedCol, f.id), f);
-      });
-      await batch.commit();
-    }
-
-    // 5. Seed Videos if empty
-    const videosSnap = await getDocs(query(videosCol, limit(1)));
-    if (videosSnap.empty) {
-      console.log("Videos cloud collection is empty. Seeding defaults...");
-      const batch = writeBatch(db);
-      DEFAULT_VIDEOS_SEED.forEach((v) => {
-        batch.set(doc(videosCol, v.id), v);
       });
       await batch.commit();
     }
@@ -238,12 +201,6 @@ export async function bulkWriteSchemaSnapshot(schema: AppSchema): Promise<void> 
     schema.feed.forEach((f) => {
       batch.set(doc(feedCol, f.id), sanitizeForFirestore(f));
     });
-
-    if (schema.videos && schema.videos.length > 0) {
-      schema.videos.forEach((v) => {
-        batch.set(doc(videosCol, v.id), sanitizeForFirestore(v));
-      });
-    }
 
     await batch.commit();
   } catch (error) {

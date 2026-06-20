@@ -9,17 +9,16 @@ import { AppSchema, UserSession } from "../types";
 import { 
   ExternalLink, LogIn, ShieldCheck, Sparkles, Building, Info, Check, 
   HelpCircle, Eye, EyeOff, AlertCircle, Bookmark, Globe, ArrowRight,
-  ListChecks, Warehouse, BookOpen, MessageSquare, Play, Lock, HelpCircle as HelpIcon
+  ListChecks, Warehouse, BookOpen, MessageSquare, Lock, HelpCircle as HelpIcon
 } from "lucide-react";
 
 interface DashboardPanelProps {
   appData: AppSchema;
   currentSession: UserSession;
   onTabChange: (tab: "procedures" | "inventory" | "checklist" | "feed" | "backups") => void;
-  onOpenVideoHub?: () => void;
 }
 
-export default function DashboardPanel({ appData, currentSession, onTabChange, onOpenVideoHub }: DashboardPanelProps) {
+export default function DashboardPanel({ appData, currentSession, onTabChange }: DashboardPanelProps) {
   // Saudi Riyadh SuccessFactors Link
   const targetUrl = "https://performancemanager.successfactors.eu/sf/home?bplte_company=riyadhinte&_s.crb=rWkjTIBD9a4RaObr4TRpXEX8Bd2gKpiiI3TCBHRDts8%253d";
 
@@ -334,46 +333,6 @@ export default function DashboardPanel({ appData, currentSession, onTabChange, o
 
         </div>
 
-        {/* COMPREHENSIVE VIDEO HUB WORKSTATION SHORTCUT */}
-        {onOpenVideoHub && (
-          <motion.div
-            whileHover={{ scale: 1.01, translateY: -2 }}
-            transition={{ duration: 0.2 }}
-            className="group relative overflow-hidden bg-slate-900 text-white rounded-[2.25rem] p-6 lg:p-8 shadow-[0_12px_44px-12px_rgba(0,0,0,0.35)] border border-slate-800 transition-all flex flex-col md:flex-row items-center justify-between gap-6 text-left"
-          >
-            {/* Background McDonald's watermark inside card */}
-            <div className="absolute right-[-40px] bottom-[-40px] w-64 h-64 opacity-[0.03] text-[#FFC72C] fill-current pointer-events-none group-hover:scale-110 group-hover:rotate-6 transition-transform duration-500 select-none">
-              <svg viewBox="0 0 500 450" className="w-full h-full">
-                <path d="M 64.93,391.8 C 64.93,250.2 118.8,110.4 186.2,110.4 C 238.1,110.4 259.7,185.3 259.7,249.2 C 259.7,185.3 281.3,110.4 333.2,110.4 C 400.6,110.4 454.5,250.2 454.5,391.8 L 398.9,391.8 C 398.9,286.9 367.6,163.5 333.2,163.5 C 304.7,163.5 289.4,228.6 289.4,302.3 L 289.4,391.8 L 229.9,391.8 L 229.9,302.3 C 229.9,228.6 214.6,163.5 186.2,163.5 C 151.7,163.5 120.4,286.9 120.4,391.8 L 64.93,391.8 Z" />
-              </svg>
-            </div>
-
-            <div className="space-y-3 max-w-2xl text-left">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 bg-red-500/20 rounded-xl flex items-center justify-center text-red-500">
-                  <Play className="w-5 h-5 fill-current text-white animate-pulse" />
-                </div>
-                <span className="px-3 py-0.5 rounded-md bg-white/10 text-amber-400 text-[9px] font-black uppercase tracking-widest font-mono">
-                  RICC Video Workstation
-                </span>
-              </div>
-              <h3 className="text-xl font-black uppercase tracking-tight text-white">
-                Interactive Operational Training Videos
-              </h3>
-              <p className="text-xs text-slate-300 leading-relaxed font-sans font-medium text-left">
-                Launch the direct broadcast deck to watch live-recorded tutorials, gold-standard production standards, station assembly setups, shift drills, and localized training materials uploaded by store coaches.
-              </p>
-            </div>
-
-            <button
-              onClick={onOpenVideoHub}
-              className="w-full md:w-auto shrink-0 bg-[#DA291C] hover:bg-neutral-800 text-white font-black py-4 px-8 rounded-2.5xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md select-none transform hover:scale-105 active:scale-95"
-            >
-              Open Workstation Video Deck
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </button>
-          </motion.div>
-        )}
       </div>
 
     </div>

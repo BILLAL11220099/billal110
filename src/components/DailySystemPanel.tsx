@@ -12,7 +12,6 @@ interface DailySystemPanelProps {
   currentSession: UserSession;
   activeSelectedChecklist: any | null; // Support the select callback from core search
   onSave: (checklistList: ChecklistItem[]) => void;
-  onOpenVideoHub?: () => void;
 }
 
 // Interactive Quizzes Definition
@@ -168,8 +167,7 @@ export default function DailySystemPanel({
   checklist,
   currentSession,
   activeSelectedChecklist,
-  onSave,
-  onOpenVideoHub
+  onSave
 }: DailySystemPanelProps) {
   // Navigation tabs for the daily system
   const [activeSubTab, setActiveSubTab] = useState<"opening" | "closing" | "training">("opening");
@@ -785,32 +783,6 @@ export default function DailySystemPanel({
       {activeSubTab === "training" && (
         <div className="space-y-6">
 
-          {/* HD Video walkthrough Center Card */}
-          {onOpenVideoHub && (
-            <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-4 ${
-              isDarkMode ? "bg-slate-850/50 border-slate-750" : "bg-gradient-to-r from-red-50 to-amber-50 border-[#DA291C]/20"
-            }`}>
-              <div className="flex items-center gap-3.5 text-left">
-                <div className="w-12 h-12 bg-[#DA291C] text-white rounded-2xl flex items-center justify-center shadow-md shrink-0">
-                  <Play className="w-6 h-6 fill-current" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-[#DA291C] dark:text-amber-400 uppercase tracking-tight">Shift Video Training Workstation</h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Learn visually! Watch expert crew guides, prep equipment walkthroughs, and safety compliance.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={onOpenVideoHub}
-                className="w-full sm:w-auto bg-[#DA291C] hover:bg-[#A3160C] text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:scale-102 transition-all cursor-pointer shrink-0"
-              >
-                <Play className="w-4 h-4 fill-current text-white" />
-                Launch Video Guides
-              </button>
-            </div>
-          )}
-          
           {/* Progress Tracker Card */}
           <div className={`p-4 sm:p-5 rounded-2xl border ${
             isDarkMode 

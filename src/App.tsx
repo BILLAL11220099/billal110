@@ -32,7 +32,6 @@ import InventoryPanel from "./components/InventoryPanel";
 import DailySystemPanel from "./components/DailySystemPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
-import WorkstationApp from "./components/workstation/WorkstationApp";
 
 import {
   LayoutDashboard, BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
@@ -175,12 +174,10 @@ export default function App() {
     procedures: false,
     inventory: false,
     checklist: false,
-    feed: false,
-    videos: false
+    feed: false
   });
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
-  const [isVideoHubOpen, setIsVideoHubOpen] = useState(false);
 
   // Search-linked active structures (for opening editors directly)
   const [activeSelectedProcedure, setActiveSelectedProcedure] = useState<CompanyProcedure | null>(null);
@@ -198,14 +195,13 @@ export default function App() {
   useEffect(() => {
     const syncTimeout = setTimeout(() => {
       setInitialSyncProgress((prev) => {
-        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed || !prev.videos) {
+        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed) {
           console.warn("Initial Cloud connection took longer than 3.5s. Falling back to local replication cache.");
           return {
             procedures: true,
             inventory: true,
             checklist: true,
-            feed: true,
-            videos: true
+            feed: true
           };
         }
         return prev;
@@ -392,49 +388,6 @@ export default function App() {
         );
         unsubs.push(unsubFeed);
 
-        // 5. Subscribe to videos
-        const unsubVideos = onSnapshot(
-          collection(db, "videos"),
-          (snapshot) => {
-            const list: VideoMetadata[] = [];
-            snapshot.docs.forEach((docSnap) => {
-              const data = docSnap.data();
-              if (data) {
-                list.push({
-                  id: data.id || docSnap.id,
-                  title: data.title || "Untitled Video",
-                  fileName: data.fileName || "",
-                  fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
-                  fileType: data.fileType || "video/mp4",
-                  uploadedBy: data.uploadedBy || "System Sync",
-                  uploadedRole: data.uploadedRole || "Crew",
-                  timestamp: data.timestamp || new Date().toISOString(),
-                  url: data.url || undefined,
-                  downloadUrl: data.downloadUrl || undefined,
-                  thumbnail: data.thumbnail || undefined,
-                  status: data.status || "Ready",
-                  progress: data.progress || 100,
-                  views: data.views || 0,
-                  description: data.description || "",
-                  category: data.category || "General",
-                });
-              }
-            });
-            updateCollectionState("videos", list);
-            setSyncStatus("connected");
-          },
-          (error) => {
-            console.error("Videos listener error:", error);
-            try {
-              handleFirestoreError(error, OperationType.GET, "videos");
-            } catch (errInfo) {
-              console.warn("Videos cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
-            }
-            setSyncStatus("error");
-          }
-        );
-        unsubs.push(unsubVideos);
-
       } catch (err) {
         console.error("Realtime subscription error:", err);
         setSyncStatus("error");
@@ -442,8 +395,7 @@ export default function App() {
           procedures: true,
           inventory: true,
           checklist: true,
-          feed: true,
-          videos: true
+          feed: true
         });
       }
     };
@@ -598,27 +550,6 @@ export default function App() {
     const updated = { ...appData, feed: newList };
     setAppData(updated);
     saveStoredData(updated, "Published Shift Notice on Feed");
-  };
-
-  const saveVideos = (newList: VideoMetadata[]) => {
-    const currentMap = new Map<string, VideoMetadata>((appData.videos || []).map((v) => [v.id, v]));
-    const newMap = new Map<string, VideoMetadata>(newList.map((v) => [v.id, v]));
-
-    for (const id of currentMap.keys()) {
-      if (!newMap.has(id)) {
-        deleteVideoMetadataDoc(id).catch(console.error);
-      }
-    }
-    for (const [id, value] of newMap.entries()) {
-      const existing = currentMap.get(id);
-      if (!existing || JSON.stringify(existing) !== JSON.stringify(value)) {
-        saveVideoMetadataDoc(value).catch(console.error);
-      }
-    }
-
-    const updated = { ...appData, videos: newList };
-    setAppData(updated);
-    saveStoredData(updated, "Saved video training guidelines to shift ledger");
   };
 
   // Restore DB callback (triggered from backups snapshot restoration)
@@ -1004,7 +935,6 @@ export default function App() {
                   setActiveTab(tab);
                   document.getElementById("tabs-ribbon-bar")?.scrollIntoView({ behavior: "smooth" });
                 }}
-                onOpenVideoHub={() => setIsVideoHubOpen(true)}
               />
             )}
 
@@ -1032,7 +962,6 @@ export default function App() {
                 currentSession={session}
                 activeSelectedChecklist={activeSelectedChecklist}
                 onSave={saveChecklist}
-                onOpenVideoHub={() => setIsVideoHubOpen(true)}
               />
             )}
 
@@ -1042,8 +971,6 @@ export default function App() {
                 currentSession={session}
                 onSave={saveFeed}
                 activeSelectedFeedPost={activeSelectedFeedPost}
-                videos={appData.videos || []}
-                onSaveVideos={saveVideos}
               />
             )}
 
@@ -1067,16 +994,6 @@ export default function App() {
           <span>OPERATOR PORTAL • SECURE OFFLINE CLOUD RECOVERY • VERSION 2.4.1-STABLE</span>
         </div>
       </footer>
-
-      {session && (
-        <WorkstationApp
-          isOpen={isVideoHubOpen}
-          onClose={() => setIsVideoHubOpen(false)}
-          videos={appData.videos || []}
-          currentSession={session}
-          onSaveVideos={saveVideos}
-        />
-      )}
 
     </div>
   );
