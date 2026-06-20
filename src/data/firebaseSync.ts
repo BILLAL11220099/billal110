@@ -13,9 +13,29 @@ import {
   query,
   limit
 } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "./firebase";
+import { getStorage, ref, deleteObject } from "firebase/storage";
+import { db, storage, handleFirestoreError, OperationType } from "./firebase";
 import { AppSchema, CompanyProcedure, InventoryItem, ChecklistItem, NewsFeedPost, VideoMetadata } from "../types";
 import { initialAppData } from "./mockDefaults";
+
+export const saveVideoMetadataDoc = async (item: VideoMetadata): Promise<void> => {
+  const path = `videos/${item.id}`;
+  try {
+    await setDoc(doc(db, "videos", item.id), sanitizeForFirestore(item));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export async function deleteVideoMetadataDoc(id: string, storagePath: string): Promise<void> {
+  const path = `videos/${id}`;
+  try {
+    await deleteDoc(doc(db, "videos", id));
+    await deleteObject(ref(storage, storagePath));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
 
 // Collection References
 const proceduresCol = collection(db, "procedures");
@@ -160,23 +180,7 @@ export async function deleteNewsFeedPostDoc(id: string): Promise<void> {
   }
 }
 
-export async function saveVideoMetadataDoc(item: VideoMetadata): Promise<void> {
-  const path = `videos/${item.id}`;
-  try {
-    await setDoc(doc(db, "videos", item.id), sanitizeForFirestore(item));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
-}
 
-export async function deleteVideoMetadataDoc(id: string): Promise<void> {
-  const path = `videos/${id}`;
-  try {
-    await deleteDoc(doc(db, "videos", id));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
-}
 
 /**
  * Bulk writes entire AppSchema (mainly useful for backups restoration & factory resets)

@@ -32,10 +32,11 @@ import InventoryPanel from "./components/InventoryPanel";
 import DailySystemPanel from "./components/DailySystemPanel";
 import NewsFeedPanel from "./components/NewsFeedPanel";
 import BackupsPanel from "./components/BackupsPanel";
+import VideoStorageHub from "./components/video_hub/VideoStorageHub";
 
 import {
   LayoutDashboard, BookOpen, Warehouse, CheckSquare, MessageSquare, ShieldAlert,
-  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw
+  LogOut, Clock, UserCheck, Sparkles, ChefHat, Salad, RefreshCw, Film
 } from "lucide-react";
 
 function parseCollections(
@@ -123,20 +124,16 @@ function parseCollections(
       videosList.push({
         id: data.id || docSnap.id,
         title: data.title || "Untitled Video",
-        fileName: data.fileName || "",
-        fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
-        fileType: data.fileType || "video/mp4",
-        uploadedBy: data.uploadedBy || "System Sync",
-        uploadedRole: data.uploadedRole || "Crew",
-        timestamp: data.timestamp || new Date().toISOString(),
-        url: data.url || undefined,
-        downloadUrl: data.downloadUrl || undefined,
-        thumbnail: data.thumbnail || undefined,
-        status: data.status || "Ready",
-        progress: data.progress || 100,
-        views: data.views || 0,
+        filename: data.filename || "",
         description: data.description || "",
-        category: data.category || "General",
+        storagePath: data.storagePath || "",
+        thumbnailUrl: data.thumbnailUrl || "",
+        videoUrl: data.videoUrl || "",
+        uploadedBy: data.uploadedBy || "System Sync",
+        uploadedAt: data.uploadedAt || new Date().toISOString(),
+        fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
+        duration: data.duration || "0:00",
+        status: data.status || "ready",
       });
     }
   });
@@ -161,7 +158,7 @@ export default function App() {
   });
 
   const [appData, setAppData] = useState<AppSchema>(() => getStoredData());
-  const [activeTab, setActiveTab] = useState<"dashboard" | "procedures" | "inventory" | "checklist" | "feed" | "backups">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "procedures" | "inventory" | "checklist" | "feed" | "videos" | "backups">("dashboard");
   
   // Real-time Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -174,7 +171,8 @@ export default function App() {
     procedures: false,
     inventory: false,
     checklist: false,
-    feed: false
+    feed: false,
+    videos: false
   });
 
   const [isForceSyncing, setIsForceSyncing] = useState(false);
@@ -195,13 +193,14 @@ export default function App() {
   useEffect(() => {
     const syncTimeout = setTimeout(() => {
       setInitialSyncProgress((prev) => {
-        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed) {
+        if (!prev.procedures || !prev.inventory || !prev.checklist || !prev.feed || !prev.videos) {
           console.warn("Initial Cloud connection took longer than 3.5s. Falling back to local replication cache.");
           return {
             procedures: true,
             inventory: true,
             checklist: true,
-            feed: true
+            feed: true,
+            videos: true
           };
         }
         return prev;
@@ -388,6 +387,45 @@ export default function App() {
         );
         unsubs.push(unsubFeed);
 
+        // 5. Subscribe to videos
+        const unsubVideos = onSnapshot(
+          collection(db, "videos"),
+          (snapshot) => {
+            const list: VideoMetadata[] = [];
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              if (data) {
+                list.push({
+                  id: data.id || docSnap.id,
+                  title: data.title || "Untitled Video",
+                  filename: data.filename || "",
+                  description: data.description || "",
+                  storagePath: data.storagePath || "",
+                  thumbnailUrl: data.thumbnailUrl || "",
+                  videoUrl: data.videoUrl || "",
+                  uploadedBy: data.uploadedBy || "System Sync",
+                  uploadedAt: data.uploadedAt || new Date().toISOString(),
+                  fileSize: typeof data.fileSize === "number" ? data.fileSize : (Number(data.fileSize) || 0),
+                  duration: data.duration || "0:00",
+                  status: data.status || "ready",
+                });
+              }
+            });
+            updateCollectionState("videos", list);
+            setSyncStatus("connected");
+          },
+          (error) => {
+            console.error("Videos listener error:", error);
+            try {
+              handleFirestoreError(error, OperationType.GET, "videos");
+            } catch (errInfo) {
+              console.warn("Videos cloud sync offline or rule propagating, using local backup replication cache.", errInfo);
+            }
+            setSyncStatus("error");
+          }
+        );
+        unsubs.push(unsubVideos);
+
       } catch (err) {
         console.error("Realtime subscription error:", err);
         setSyncStatus("error");
@@ -395,7 +433,8 @@ export default function App() {
           procedures: true,
           inventory: true,
           checklist: true,
-          feed: true
+          feed: true,
+          videos: true
         });
       }
     };
@@ -896,6 +935,22 @@ export default function App() {
               News Feed
             </button>
 
+            {/* tab: Video Storage Hub */}
+            <button
+              id="tab-videos-trigger"
+              onClick={() => {
+                setActiveTab("videos");
+              }}
+              className={`flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
+                activeTab === "videos"
+                  ? "bg-amber-50 text-amber-850 border border-[#DA291C]/30 shadow-xs"
+                  : "bg-transparent border border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+              }`}
+            >
+              <Film className="w-4 h-4 shrink-0 text-[#DA291C]" />
+              Video Storage Hub
+            </button>
+
             {/* tab: Backups Security */}
             <button
               id="tab-backups-trigger"
@@ -971,6 +1026,13 @@ export default function App() {
                 currentSession={session}
                 onSave={saveFeed}
                 activeSelectedFeedPost={activeSelectedFeedPost}
+              />
+            )}
+
+            {activeTab === "videos" && (
+              <VideoStorageHub
+                videos={appData.videos || []}
+                currentSession={session}
               />
             )}
 

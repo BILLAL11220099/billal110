@@ -61,7 +61,6 @@ export function getStoredData(): AppSchema {
  */
 export function saveStoredData(data: AppSchema, changeDescription: string = "Manual Update") {
   saveToLocal(STORAGE_KEY, data);
-  // Auto backup for important history recovery
   createAutomatedBackup(data, changeDescription);
 }
 

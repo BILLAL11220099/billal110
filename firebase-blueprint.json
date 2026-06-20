@@ -72,15 +72,18 @@
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
-        "fileName": { "type": "string" },
-        "fileSize": { "type": "number" },
-        "fileType": { "type": "string" },
+        "filename": { "type": "string" },
+        "description": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
         "uploadedBy": { "type": "string" },
-        "uploadedRole": { "type": "string" },
-        "timestamp": { "type": "string" },
-        "url": { "type": "string" }
+        "uploadedAt": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "duration": { "type": "string" },
+        "status": { "type": "string" }
       },
-      "required": ["id", "title", "fileName", "timestamp"]
+      "required": ["id", "title", "filename", "storagePath", "thumbnailUrl", "videoUrl", "uploadedBy", "uploadedAt", "fileSize", "status"]
     }
   },
   "firestore": {

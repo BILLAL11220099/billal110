@@ -1,24 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
     match /procedures/{procedureId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn(); // Requires more hardening later
     }
 
     match /inventory/{inventoryId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
     match /checklist/{checklistId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
     match /feed/{postId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
     match /videos/{videoId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // Hardening required
+      allow update, delete: if isSignedIn(); // Hardening required (Only uploader/admin)
     }
   }
 }

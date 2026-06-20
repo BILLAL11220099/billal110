@@ -79,24 +79,16 @@ export interface AppSchema {
 export interface VideoMetadata {
   id: string;
   title: string;
-  fileName: string;
-  fileSize: number;
-  fileType: string;
+  filename: string;
+  description: string;
+  storagePath: string;
+  thumbnailUrl: string;
+  videoUrl: string;
   uploadedBy: string;
-  uploadedRole: string;
-  timestamp: string;
-  url?: string; // fallback or external video url if locally stored blob isn't loaded in browser DB
-  downloadUrl?: string; // Original URL for downloading the file
-  description?: string;
-  category?: string;
-  thumbnail?: string; // Base64 or ObjectURL of the generated thumbnail image
-  isPrivate?: boolean;
-  likes?: number;
-  likedBy?: string[];
-  views?: number;
-  downloads?: number;
-  status?: "Uploading" | "Converting" | "Ready" | "Error";
-  progress?: number;
+  uploadedAt: string;
+  fileSize: number;
+  duration: string;
+  status: "processing" | "ready";
 }
 
 export interface BackupSnapshot {
