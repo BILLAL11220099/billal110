@@ -133,53 +133,46 @@ async function transcodeVideo(videoId: string, originalName: string) {
     }
   }
 
-  console.log(`[Storage] Uploading transcoded assets for ${videoId} to Firebase Cloud Storage...`);
+  console.log(`[Storage] Retaining transcoded assets for ${videoId} locally on disk...`);
   try {
      let mp4Url = "";
      let thumbUrl = "";
      let originalUrl = "";
 
-     // Upload Original
-     const ogRef = storageRef(fbStorage, `workstation/${videoId}/${originalName}`);
-     const ogBuffer = fs.readFileSync(sourcePath);
-     await uploadBytes(ogRef, new Uint8Array(ogBuffer));
-     originalUrl = await getDownloadURL(ogRef);
+     // Original
+     originalUrl = `/uploads/${videoId}/${originalName}`;
 
-     // Upload thumbnail
+     // Thumbnail
      if (fs.existsSync(thumbnailPath)) {
-       const thumbRef = storageRef(fbStorage, `workstation/${videoId}/thumbnail.jpg`);
-       const tbBuffer = fs.readFileSync(thumbnailPath);
-       await uploadBytes(thumbRef, new Uint8Array(tbBuffer), { contentType: "image/jpeg" });
-       thumbUrl = await getDownloadURL(thumbRef);
+       thumbUrl = `/uploads/${videoId}/thumbnail.jpg`;
      }
 
-     // Upload MP4
+     // MP4
      if (fs.existsSync(compatibleMp4Path)) {
-       const mp4Ref = storageRef(fbStorage, `workstation/${videoId}/compatible.mp4`);
-       const mp4Buffer = fs.readFileSync(compatibleMp4Path);
-       await uploadBytes(mp4Ref, new Uint8Array(mp4Buffer), { contentType: "video/mp4" });
-       mp4Url = await getDownloadURL(mp4Ref);
+       mp4Url = `/uploads/${videoId}/compatible.mp4`;
      } else {
        mp4Url = originalUrl;
      }
 
-     if(fbDb) {
+     if (fbDb) {
        await setDoc(doc(fbDb, "videos", videoId), {
           status: "Ready",
           progress: 100,
           url: mp4Url,
-          downloadUrl: originalUrl,
-          thumbnail: thumbUrl || "",
+          downloadUrl: originalUrl
        }, { merge: true });
+       // Note: To preserve the colorful generated SVG if no thumbnail was generated via FFmpeg:
+       if (thumbUrl) {
+         await setDoc(doc(fbDb, "videos", videoId), { thumbnail: thumbUrl }, { merge: true });
+       }
      }
 
-     console.log(`[Storage] Successfully uploaded and recorded cloud URLs for ${videoId}`);
+     console.log(`[Storage] Successfully recorded local URLs for ${videoId}`);
      
-     // Cleanup local files immediately to save container disk space
-     fs.rmSync(dir, { recursive: true, force: true });
+     // IMPORTANT: Do NOT rmSync the local dir since we serve directly from it!
   } catch(err) {
-     console.error("[Storage] Failed to upload files to Cloud Storage", err);
-     if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { status: "Error", description: "Cloud storage fail" }, { merge: true });
+     console.error("[Storage] Failed to finalize transcoded files", err);
+     if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { status: "Error", description: "Storage finalization fail" }, { merge: true });
   }
 }
 
@@ -384,53 +377,86 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // REST API: Upload Video file
-  app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
-    if (!req.file) {
-      return res.status(400).json({ error: "No video file provided" });
-    }
+  // REST API: Chunked upload
+  app.post("/api/videos/upload_chunk", upload.single("chunk"), (req, res) => {
+    const videoId = req.body.id;
+    const chunkIndex = parseInt(req.body.chunkIndex, 10);
+    const totalChunks = parseInt(req.body.totalChunks, 10);
+    
+    if (!req.file || !videoId) return res.status(400).json({ error: "Missing chunk" });
 
-    const { id, title, uploadedBy, uploadedRole, category, description } = req.body;
-    const videoId = id || "vid_" + Date.now();
+    const dir = path.join(UPLOADS_DIR, videoId);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    
+    const chunkPath = path.join(dir, `chunk_${chunkIndex}`);
+    fs.renameSync(req.file.path, chunkPath);
+    
+    res.json({ success: true, chunkIndex });
+  });
 
-    const newVideo: VideoMetadata = {
-      id: videoId,
-      title: title || req.file.originalname.split(".")[0].replace(/[_-]/g, " "),
-      fileName: req.file.originalname,
-      fileSize: req.file.size,
-      fileType: req.file.mimetype || "video/mp4",
-      uploadedBy: uploadedBy || "Crew Member",
-      uploadedRole: uploadedRole || "Crew",
-      timestamp: new Date().toISOString(),
-      description: description || "Universal streaming guide secured in server cloud parameters. Optimized with multi-device resolution transcoding.",
-      category: category || "Training Guides",
-      status: "Converting",
-      progress: 5,
-      likes: 0,
-      likedBy: [],
-      views: 0,
-      downloads: 0
-    };
-
-    // Pre-insert default generated thumbnail representation
-    const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
-    const idx = Math.abs(newVideo.title.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length;
-    const baseColor = colors[idx];
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${newVideo.title}</text><text x="50%" y="70%" text-anchor="middle" fill="${baseColor}" font-size="10" font-family="monospace">CONVERTING STAGE...</text></svg>`;
-    newVideo.thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-
-    if(fbDb) {
-      try {
-        await setDoc(doc(fbDb, "videos", videoId), newVideo);
-      } catch(e) {
-        console.error("Failed to allocate in cloud", e);
+  app.post("/api/videos/upload_finalize", async (req, res) => {
+    const { id, originalName, title, description, category, uploadedBy, uploadedRole, totalChunks, size, type } = req.body;
+    
+    const dir = path.join(UPLOADS_DIR, id);
+    const finalPath = path.join(dir, originalName);
+    
+    try {
+      if (fs.existsSync(finalPath)) {
+        fs.unlinkSync(finalPath);
       }
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(dir, `chunk_${i}`);
+        if (fs.existsSync(chunkPath)) {
+          const chunkData = fs.readFileSync(chunkPath);
+          fs.appendFileSync(finalPath, chunkData);
+          fs.unlinkSync(chunkPath); 
+        }
+      }
+      
+      const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
+      const displayTitle = title || "Untitled";
+      const baseColor = colors[Math.abs(displayTitle.charCodeAt(0) || 0) % colors.length] || "#22d3ee";
+      const escapedTitle = displayTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${escapedTitle}</text><text x="50%" y="70%" text-anchor="middle" fill="${baseColor}" font-size="10" font-family="monospace">CONVERTING STAGE...</text></svg>`;
+      const thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+      const newVideo = {
+        id,
+        title: displayTitle,
+        fileName: originalName,
+        fileSize: size,
+        fileType: type,
+        uploadedBy: uploadedBy || "Crew Member",
+        uploadedRole: uploadedRole || "Crew",
+        description: description || "",
+        category: category || "General",
+        timestamp: new Date().toISOString(),
+        thumbnail,
+        status: "Converting",
+        progress: 0,
+        views: 0,
+        downloads: 0,
+        likes: 0,
+        likedBy: [],
+        url: "",
+        downloadUrl: ""
+      };
+
+      if(fbDb) {
+        try {
+          await setDoc(doc(fbDb, "videos", id), newVideo);
+        } catch(e) {
+          console.error("Failed to allocate in cloud", e);
+        }
+      }
+
+      transcodeVideo(id, originalName);
+      
+      res.json({ success: true, video: newVideo });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed assembling chunks" });
     }
-
-    // Trigger transcoding process on another thread stack/asynchronously
-    transcodeVideo(videoId, req.file.originalname);
-
-    res.json({ success: true, video: newVideo });
   });
 
   // REST API: Delete Video
