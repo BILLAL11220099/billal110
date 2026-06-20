@@ -201,6 +201,15 @@ async function transcodeVideo(videoId: string, originalName: string) {
 async function startServer() {
   const app = express();
 
+  const logFile = path.join(process.cwd(), "server.log");
+  const logToLocalFile = (msg: string) => {
+    const timestamp = new Date().toISOString();
+    try {
+      fs.appendFileSync(logFile, `[${timestamp}] ${msg}\n`);
+    } catch(e) {}
+    console.log(`[ServerLog] ${msg}`);
+  };
+
   // Parse payloads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -210,6 +219,14 @@ async function startServer() {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type");
+    next();
+  });
+
+  // Logging API requests
+  app.use((req, res, next) => {
+    if (req.url.startsWith("/api/videos")) {
+      logToLocalFile(`INCOMING REQUEST: ${req.method} ${req.url} - Headers: ${JSON.stringify(req.headers)}`);
+    }
     next();
   });
 
