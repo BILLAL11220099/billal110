@@ -8,7 +8,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFirestore, doc, setDoc, deleteDoc, getDocs, collection, getDoc, updateDoc } from "firebase/firestore";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, getBytes } from "firebase/storage";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -95,6 +95,33 @@ function checkIfCommandExists(command: string): Promise<boolean> {
   });
 }
 
+// Helper to recursively upload directory structures to Firebase Cloud Storage
+async function uploadDirectoryToStorage(localDirPath: string, remoteDirPath: string, fbStorageInstance: any) {
+  if (!fs.existsSync(localDirPath)) return;
+  const files = fs.readdirSync(localDirPath);
+  for (const file of files) {
+    const fullPath = path.join(localDirPath, file);
+    const remotePath = `${remoteDirPath}/${file}`;
+    if (fs.statSync(fullPath).isDirectory()) {
+      await uploadDirectoryToStorage(fullPath, remotePath, fbStorageInstance);
+    } else {
+      const fileBuffer = fs.readFileSync(fullPath);
+      let contentType = "application/octet-stream";
+      if (file.endsWith(".m3u8")) {
+        contentType = "application/x-mpegURL";
+      } else if (file.endsWith(".ts")) {
+        contentType = "video/MP2T";
+      } else if (file.endsWith(".mp4")) {
+        contentType = "video/mp4";
+      } else if (file.endsWith(".jpg") || file.endsWith(".jpeg")) {
+        contentType = "image/jpeg";
+      }
+      const fileRef = storageRef(fbStorageInstance, remotePath);
+      await uploadBytes(fileRef, new Uint8Array(fileBuffer), { contentType });
+    }
+  }
+}
+
 // Background Video Transcoding Handler
 async function transcodeVideo(videoId: string, originalName: string) {
   const dir = path.join(UPLOADS_DIR, videoId);
@@ -117,7 +144,7 @@ async function transcodeVideo(videoId: string, originalName: string) {
       await new Promise<void>((resolve) => {
         exec(`ffmpeg -y -ss 00:00:00.500 -i "${sourcePath}" -vframes 1 -q:v 2 "${thumbnailPath}"`, () => resolve());
       });
-      if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: 30, status: "Converting" }, { merge: true });
+      if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: 10, status: "Converting" }, { merge: true });
 
       console.log(`[Transcoder] Converting to compatible MP4 for ${videoId}...`);
       const mp4Cmd = `ffmpeg -y -i "${sourcePath}" -vcodec libx264 -acodec aac -pix_fmt yuv420p -b:a 128k -preset superfast -movflags +faststart "${compatibleMp4Path}"`;
@@ -126,7 +153,56 @@ async function transcodeVideo(videoId: string, originalName: string) {
           if (err) reject(err); else resolve();
         });
       });
-      if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: 80, status: "Converting" }, { merge: true });
+      if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: 30, status: "Converting" }, { merge: true });
+
+      // Generate HLS Folder
+      const hlsDir = path.join(dir, "hls");
+      if (!fs.existsSync(hlsDir)) fs.mkdirSync(hlsDir, { recursive: true });
+
+      // Resolutions to generate
+      const resolutions = [
+        { name: "240p", height: 240, vBitrate: "300k", aBitrate: "64k" },
+        { name: "360p", height: 360, vBitrate: "600k", aBitrate: "96k" },
+        { name: "480p", height: 480, vBitrate: "1000k", aBitrate: "128k" },
+        { name: "720p", height: 720, vBitrate: "2500k", aBitrate: "128k" },
+        { name: "1080p", height: 1080, vBitrate: "4500k", aBitrate: "192k" }
+      ];
+
+      for (let i = 0; i < resolutions.length; i++) {
+        const res = resolutions[i];
+        console.log(`[Transcoder] Transcoding HLS stream level: ${res.name} for ${videoId}...`);
+        
+        // Execute ffmpeg with audio mapping
+        const hasAudioCmd = `ffmpeg -y -i "${sourcePath}" -vf "scale=-2:${res.height}" -c:v libx264 -preset ultrafast -b:v ${res.vBitrate} -maxrate ${res.vBitrate} -bufsize ${parseInt(res.vBitrate)*2}k -c:a aac -b:a ${res.aBitrate} -hls_time 6 -hls_playlist_type vod -hls_segment_filename "${hlsDir}/${res.name}_%03d.ts" "${hlsDir}/${res.name}.m3u8"`;
+        
+        await new Promise<void>((resolve) => {
+          exec(hasAudioCmd, (err) => {
+            if (err) {
+              console.warn(`[Transcoder] Ffmpeg with audio failed for level ${res.name}, falling back to silent video mode`, err);
+              // Retry without audio mapping (-an)
+              const silentCmd = `ffmpeg -y -i "${sourcePath}" -vf "scale=-2:${res.height}" -c:v libx264 -preset ultrafast -b:v ${res.vBitrate} -maxrate ${res.vBitrate} -bufsize ${parseInt(res.vBitrate)*2}k -an -hls_time 6 -hls_playlist_type vod -hls_segment_filename "${hlsDir}/${res.name}_%03d.ts" "${hlsDir}/${res.name}.m3u8"`;
+              exec(silentCmd, () => resolve());
+            } else {
+              resolve();
+            }
+          });
+        });
+
+        const progressPercent = 30 + Math.round(((i + 1) / resolutions.length) * 50); // scales from 30% to 80%
+        if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: progressPercent, status: "Converting" }, { merge: true });
+      }
+
+      // Write master.m3u8 playlist file referencing the relative resolution playlists
+      const masterContent = `#EXTM3U\n#EXT-X-VERSION:3\n` + 
+        `#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=426x240\n240p.m3u8\n` +
+        `#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\n360p.m3u8\n` +
+        `#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=854x480\n480p.m3u8\n` +
+        `#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720\n720p.m3u8\n` +
+        `#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n1080p.m3u8\n`;
+      
+      fs.writeFileSync(path.join(hlsDir, "master.m3u8"), masterContent);
+      console.log(`[Transcoder] Generated master playlist successfully for ${videoId}`);
+      if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { progress: 85, status: "Converting" }, { merge: true });
       
     } catch (err) {
        console.error("[Transcoder] FFmpeg Transcoding pipeline failed:", err);
@@ -138,14 +214,15 @@ async function transcodeVideo(videoId: string, originalName: string) {
      let mp4Url = "";
      let thumbUrl = "";
      let originalUrl = "";
+     let hlsMasterUrl = "";
 
-     // Original
+     // Original video
      const ogRef = storageRef(fbStorage, `workstation/${videoId}/${originalName}`);
      const ogBuffer = fs.readFileSync(sourcePath);
      await uploadBytes(ogRef, new Uint8Array(ogBuffer));
      originalUrl = await getDownloadURL(ogRef);
 
-     // Thumbnail
+     // Thumbnail image
      if (fs.existsSync(thumbnailPath)) {
        const thumbRef = storageRef(fbStorage, `workstation/${videoId}/thumbnail.jpg`);
        const tbBuffer = fs.readFileSync(thumbnailPath);
@@ -153,7 +230,7 @@ async function transcodeVideo(videoId: string, originalName: string) {
        thumbUrl = await getDownloadURL(thumbRef);
      }
 
-     // MP4
+     // MP4 compatible file
      if (fs.existsSync(compatibleMp4Path)) {
        const mp4Ref = storageRef(fbStorage, `workstation/${videoId}/compatible.mp4`);
        const mp4Buffer = fs.readFileSync(compatibleMp4Path);
@@ -163,11 +240,21 @@ async function transcodeVideo(videoId: string, originalName: string) {
        mp4Url = originalUrl;
      }
 
+     // HLS folder recursive upload
+     const hlsDir = path.join(dir, "hls");
+     if (fs.existsSync(hlsDir)) {
+       console.log(`[Storage] Uploading HLS directory structure for ${videoId}`);
+       await uploadDirectoryToStorage(hlsDir, `workstation/${videoId}/hls`, fbStorage);
+       
+       // Standard video stream URL is now set to our CORS-friendly proxy route
+       hlsMasterUrl = `/api/videos/stream/${videoId}/hls/master.m3u8`;
+     }
+
      if (fbDb) {
        await setDoc(doc(fbDb, "videos", videoId), {
           status: "Ready",
           progress: 100,
-          url: mp4Url,
+          url: hlsMasterUrl || mp4Url,
           downloadUrl: originalUrl
        }, { merge: true });
        if (thumbUrl) {
@@ -185,12 +272,13 @@ async function transcodeVideo(videoId: string, originalName: string) {
      const originalFallback = `/uploads/${videoId}/${originalName}`;
      const mp4Fallback = fs.existsSync(compatibleMp4Path) ? `/uploads/${videoId}/compatible.mp4` : originalFallback;
      const thumbFallback = fs.existsSync(thumbnailPath) ? `/uploads/${videoId}/thumbnail.jpg` : "";
+     const hlsMasterUrl = `/api/videos/stream/${videoId}/hls/master.m3u8`;
      
      if(fbDb) {
          await setDoc(doc(fbDb, "videos", videoId), { 
              status: "Ready", 
              progress: 100, 
-             url: mp4Fallback, 
+             url: hlsMasterUrl, 
              downloadUrl: originalFallback,
              ...(thumbFallback ? { thumbnail: thumbFallback } : {})
          }, { merge: true });
@@ -218,8 +306,70 @@ async function startServer() {
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
     next();
+  });
+
+  // REST API: Proxy HLS streaming chunks from Firebase Storage
+  app.get("/api/videos/stream/:videoId/hls/:file", async (req, res) => {
+    const { videoId, file } = req.params;
+    try {
+      if (!fbStorage) {
+        throw new Error("Firebase Storage reference is not initialized");
+      }
+      const fileRef = storageRef(fbStorage, `workstation/${videoId}/hls/${file}`);
+      const buffer = await getBytes(fileRef);
+      
+      if (file.endsWith(".m3u8")) {
+        res.setHeader("Content-Type", "application/x-mpegURL");
+      } else if (file.endsWith(".ts")) {
+        res.setHeader("Content-Type", "video/MP2T");
+      }
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); // Cache files (especially .ts chunks) to allow instant playback
+      res.send(Buffer.from(buffer));
+    } catch (err: any) {
+      // Ephemeral filesystem fallback
+      const localFile = path.join(UPLOADS_DIR, videoId, "hls", file);
+      if (fs.existsSync(localFile)) {
+        if (file.endsWith(".m3u8")) {
+          res.setHeader("Content-Type", "application/x-mpegURL");
+        } else if (file.endsWith(".ts")) {
+          res.setHeader("Content-Type", "video/MP2T");
+        }
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.sendFile(localFile);
+      }
+      
+      console.warn(`[Stream Proxy Warning] Failed streaming HLS file ${file} for video ${videoId}:`, err.message);
+      res.status(404).send("Segment not found");
+    }
+  });
+
+  // REST API: Proxy MP4 video file from Firebase Storage
+  app.get("/api/videos/stream/:videoId/mp4", async (req, res) => {
+    const { videoId } = req.params;
+    try {
+      if (!fbStorage) {
+        throw new Error("Firebase Storage reference is not initialized");
+      }
+      const fileRef = storageRef(fbStorage, `workstation/${videoId}/compatible.mp4`);
+      const buffer = await getBytes(fileRef);
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.send(Buffer.from(buffer));
+    } catch (err: any) {
+      const localFile = path.join(UPLOADS_DIR, videoId, "compatible.mp4");
+      if (fs.existsSync(localFile)) {
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.sendFile(localFile);
+      }
+      res.status(404).send("MP4 compatible source not found");
+    }
   });
 
   // Logging API requests
