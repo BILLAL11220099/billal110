@@ -73,12 +73,12 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     setStatus("uploading");
     
     const videoId = "vid_" + Date.now();
-    const chunkSize = 1 * 1024 * 1024; // 1MB chunks (smaller for safety)
+    const chunkSize = 512 * 1024; // 512KB chunks to safely bypass ingress proxy limits
     const totalChunks = Math.ceil(selectedFile.size / chunkSize);
     
     setStatus("uploading");
     
-    const uploadChunk = async (chunkIndex: number) => {
+    const uploadChunk = async (chunkIndex: number, retries = 3) => {
       if (chunkIndex >= totalChunks) {
         // Finalize
         try {
@@ -134,15 +134,25 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
         if (xhr.status >= 200 && xhr.status < 300) {
           uploadChunk(chunkIndex + 1);
         } else {
-          setStatus("error");
-          console.error("Upload error text:", xhr.responseText);
-          setErrorMsg("Failed on chunk " + chunkIndex + " (Status " + xhr.status + "): " + xhr.responseText);
+          if (retries > 0) {
+              console.warn(`Chunk ${chunkIndex} failed, retrying... (${retries} left)`);
+              setTimeout(() => uploadChunk(chunkIndex, retries - 1), 1000);
+          } else {
+              setStatus("error");
+              console.error("Upload error text:", xhr.responseText);
+              setErrorMsg("Failed on chunk " + chunkIndex + " (Status " + xhr.status + "): " + xhr.responseText);
+          }
         }
       });
       
       xhr.addEventListener("error", () => {
-        setStatus("error");
-        setErrorMsg("Network error on chunk " + chunkIndex);
+        if (retries > 0) {
+            console.warn(`Chunk ${chunkIndex} network error, retrying... (${retries} left)`);
+            setTimeout(() => uploadChunk(chunkIndex, retries - 1), 1000);
+        } else {
+            setStatus("error");
+            setErrorMsg("Network error on chunk " + chunkIndex);
+        }
       });
       
       xhr.open("POST", "/api/videos/upload_chunk", true);

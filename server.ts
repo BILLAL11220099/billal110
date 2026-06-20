@@ -213,6 +213,94 @@ async function startServer() {
     next();
   });
 
+  // REST API: Chunked upload
+  app.post("/api/videos/upload_chunk", upload.single("chunk"), (req, res) => {
+    try {
+      const videoId = req.body.id;
+      const chunkIndex = parseInt(req.body.chunkIndex, 10);
+      const totalChunks = parseInt(req.body.totalChunks, 10);
+      
+      if (!req.file) return res.status(400).json({ error: "Missing chunk file" });
+      if (!videoId) return res.status(400).json({ error: "Missing videoId" });
+
+      const dir = path.join(UPLOADS_DIR, videoId);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      
+      const chunkPath = path.join(dir, `chunk_${chunkIndex}`);
+      fs.renameSync(req.file.path, chunkPath);
+      
+      res.json({ success: true, chunkIndex });
+    } catch(err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/videos/upload_finalize", async (req, res) => {
+    const { id, originalName, title, description, category, uploadedBy, uploadedRole, totalChunks, size, type } = req.body;
+    
+    const dir = path.join(UPLOADS_DIR, id);
+    const finalPath = path.join(dir, originalName);
+    
+    try {
+      if (fs.existsSync(finalPath)) {
+        fs.unlinkSync(finalPath);
+      }
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(dir, `chunk_${i}`);
+        if (fs.existsSync(chunkPath)) {
+          const chunkData = fs.readFileSync(chunkPath);
+          fs.appendFileSync(finalPath, chunkData);
+          fs.unlinkSync(chunkPath); 
+        }
+      }
+      
+      const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
+      const displayTitle = title || "Untitled";
+      const baseColor = colors[Math.abs(displayTitle.charCodeAt(0) || 0) % colors.length] || "#22d3ee";
+      const escapedTitle = displayTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${escapedTitle}</text><text x="50%" y="70%" text-anchor="middle" fill="${baseColor}" font-size="10" font-family="monospace">CONVERTING STAGE...</text></svg>`;
+      const thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+      const newVideo = {
+        id,
+        title: displayTitle,
+        fileName: originalName,
+        fileSize: size,
+        fileType: type,
+        uploadedBy: uploadedBy || "Crew Member",
+        uploadedRole: uploadedRole || "Crew",
+        description: description || "",
+        category: category || "General",
+        timestamp: new Date().toISOString(),
+        thumbnail,
+        status: "Converting",
+        progress: 0,
+        views: 0,
+        downloads: 0,
+        likes: 0,
+        likedBy: [],
+        url: "",
+        downloadUrl: ""
+      };
+
+      if(fbDb) {
+        try {
+          await setDoc(doc(fbDb, "videos", id), newVideo);
+        } catch(e) {
+          console.error("Failed to allocate in cloud", e);
+        }
+      }
+
+      transcodeVideo(id, originalName);
+      
+      res.json({ success: true, video: newVideo });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed assembling chunks" });
+    }
+  });
+
   // REST API: Get all videos list
   app.get("/api/videos", async (req, res) => {
     if (!fbDb) return res.json([]);
@@ -397,94 +485,6 @@ async function startServer() {
 
     await updateDoc(doc(fbDb, "videos", req.params.id), { thumbnail });
     res.json({ success: true });
-  });
-
-  // REST API: Chunked upload
-  app.post("/api/videos/upload_chunk", upload.single("chunk"), (req, res) => {
-    try {
-      const videoId = req.body.id;
-      const chunkIndex = parseInt(req.body.chunkIndex, 10);
-      const totalChunks = parseInt(req.body.totalChunks, 10);
-      
-      if (!req.file) return res.status(400).json({ error: "Missing chunk file" });
-      if (!videoId) return res.status(400).json({ error: "Missing videoId" });
-
-      const dir = path.join(UPLOADS_DIR, videoId);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      
-      const chunkPath = path.join(dir, `chunk_${chunkIndex}`);
-      fs.renameSync(req.file.path, chunkPath);
-      
-      res.json({ success: true, chunkIndex });
-    } catch(err: any) {
-      console.error(err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/videos/upload_finalize", async (req, res) => {
-    const { id, originalName, title, description, category, uploadedBy, uploadedRole, totalChunks, size, type } = req.body;
-    
-    const dir = path.join(UPLOADS_DIR, id);
-    const finalPath = path.join(dir, originalName);
-    
-    try {
-      if (fs.existsSync(finalPath)) {
-        fs.unlinkSync(finalPath);
-      }
-      for (let i = 0; i < totalChunks; i++) {
-        const chunkPath = path.join(dir, `chunk_${i}`);
-        if (fs.existsSync(chunkPath)) {
-          const chunkData = fs.readFileSync(chunkPath);
-          fs.appendFileSync(finalPath, chunkData);
-          fs.unlinkSync(chunkPath); 
-        }
-      }
-      
-      const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
-      const displayTitle = title || "Untitled";
-      const baseColor = colors[Math.abs(displayTitle.charCodeAt(0) || 0) % colors.length] || "#22d3ee";
-      const escapedTitle = displayTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${escapedTitle}</text><text x="50%" y="70%" text-anchor="middle" fill="${baseColor}" font-size="10" font-family="monospace">CONVERTING STAGE...</text></svg>`;
-      const thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-
-      const newVideo = {
-        id,
-        title: displayTitle,
-        fileName: originalName,
-        fileSize: size,
-        fileType: type,
-        uploadedBy: uploadedBy || "Crew Member",
-        uploadedRole: uploadedRole || "Crew",
-        description: description || "",
-        category: category || "General",
-        timestamp: new Date().toISOString(),
-        thumbnail,
-        status: "Converting",
-        progress: 0,
-        views: 0,
-        downloads: 0,
-        likes: 0,
-        likedBy: [],
-        url: "",
-        downloadUrl: ""
-      };
-
-      if(fbDb) {
-        try {
-          await setDoc(doc(fbDb, "videos", id), newVideo);
-        } catch(e) {
-          console.error("Failed to allocate in cloud", e);
-        }
-      }
-
-      transcodeVideo(id, originalName);
-      
-      res.json({ success: true, video: newVideo });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed assembling chunks" });
-    }
   });
 
   // REST API: Delete Video
