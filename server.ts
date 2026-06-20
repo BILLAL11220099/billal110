@@ -379,19 +379,25 @@ async function startServer() {
 
   // REST API: Chunked upload
   app.post("/api/videos/upload_chunk", upload.single("chunk"), (req, res) => {
-    const videoId = req.body.id;
-    const chunkIndex = parseInt(req.body.chunkIndex, 10);
-    const totalChunks = parseInt(req.body.totalChunks, 10);
-    
-    if (!req.file || !videoId) return res.status(400).json({ error: "Missing chunk" });
+    try {
+      const videoId = req.body.id;
+      const chunkIndex = parseInt(req.body.chunkIndex, 10);
+      const totalChunks = parseInt(req.body.totalChunks, 10);
+      
+      if (!req.file) return res.status(400).json({ error: "Missing chunk file" });
+      if (!videoId) return res.status(400).json({ error: "Missing videoId" });
 
-    const dir = path.join(UPLOADS_DIR, videoId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    
-    const chunkPath = path.join(dir, `chunk_${chunkIndex}`);
-    fs.renameSync(req.file.path, chunkPath);
-    
-    res.json({ success: true, chunkIndex });
+      const dir = path.join(UPLOADS_DIR, videoId);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      
+      const chunkPath = path.join(dir, `chunk_${chunkIndex}`);
+      fs.renameSync(req.file.path, chunkPath);
+      
+      res.json({ success: true, chunkIndex });
+    } catch(err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/videos/upload_finalize", async (req, res) => {
