@@ -29,10 +29,20 @@ export default function WatchPage({ video, allVideos, onPlayAnother, onClose, da
     }
   };
 
-  const handleDownload = () => {
-    // Navigate to the backend endpoint which implements analytics 
-    // and securely redirects to the signed original cloud storage payload.
-    window.open(`/api/videos/${video.id}/download`, "_blank");
+  const handleDownload = async () => {
+    try {
+      const db = (await import("../../data/firebase")).db;
+      const { doc, updateDoc, increment } = await import("firebase/firestore");
+      await updateDoc(doc(db, "videos", video.id), {
+        downloads: increment(1)
+      });
+    } catch(err) {
+      console.warn("Failed to increment download counter", err);
+    }
+    const targetUrl = video.downloadUrl || video.url;
+    if (targetUrl) {
+      window.open(targetUrl, "_blank");
+    }
   };
 
   useEffect(() => {
