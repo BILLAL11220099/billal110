@@ -38,6 +38,22 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     }
   };
 
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const dt = e.dataTransfer;
+    if (dt.files && dt.files[0]) {
+      const file = dt.files[0];
+      if (file.size > 500 * 1024 * 1024) {
+        setErrorMsg("File exceeds 500MB maximum size limit.");
+        return;
+      }
+      setSelectedFile(file);
+      setTitle(file.name.replace(/\.[^/.]+$/, ""));
+      setErrorMsg("");
+      setStatus("idle");
+    }
+  };
+
   const startUpload = () => {
     if (!selectedFile) return;
     if (!title.trim()) {
@@ -45,66 +61,56 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
       return;
     }
     
-    // We mock the generation of 1080p etc by adding wait times to simulate processing
-    const videoId = "vid_" + Date.now();
-    const storageRef = ref(storage, `workstation/${videoId}_${selectedFile.name}`);
-    const task = uploadBytesResumable(storageRef, selectedFile);
-    
-    setUploadTask(task);
     setStatus("uploading");
     
-    task.on("state_changed", 
-      (snapshot) => {
-        const p = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+    const formData = new FormData();
+    formData.append("video", selectedFile);
+    formData.append("title", title);
+    formData.append("description", description);
+    formData.append("category", category);
+    formData.append("uploadedBy", currentSession.username);
+    formData.append("uploadedRole", currentSession.role);
+    formData.append("id", "vid_" + Date.now());
+
+    const xhr = new XMLHttpRequest();
+    // Use a ref to store xhr if we want to support cancelling, but let's keep it simple
+    
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        const p = (e.loaded / e.total) * 100;
         setProgress(p);
-        switch (snapshot.state) {
-          case 'paused':
-            setStatus("paused");
-            break;
-          case 'running':
-            setStatus("uploading");
-            break;
-        }
-      },
-      (error) => {
-        setStatus("error");
-        setErrorMsg(error.message);
-      },
-      async () => {
-        // success
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
         setStatus("success");
-        const downloadURL = await getDownloadURL(task.snapshot.ref);
-        
-        const newMeta: VideoMetadata = {
-          id: videoId,
-          title,
-          description,
-          category,
-          fileName: selectedFile.name,
-          fileSize: selectedFile.size,
-          fileType: selectedFile.type,
-          uploadedBy: currentSession.username,
-          uploadedRole: currentSession.role,
-          timestamp: new Date().toISOString(),
-          url: downloadURL,
-          views: 0
-        };
-        
         setTimeout(() => {
-          onSaveVideo(newMeta);
           onClose(); // Automatically close on success
         }, 2000);
+      } else {
+        setStatus("error");
+        try {
+          const res = JSON.parse(xhr.responseText);
+          setErrorMsg(res.error || "Upload failed");
+        } catch {
+          setErrorMsg("Upload failed with status " + xhr.status);
+        }
       }
-    );
+    });
+
+    xhr.addEventListener("error", () => {
+      setStatus("error");
+      setErrorMsg("Network error occurred during upload.");
+    });
+
+    xhr.open("POST", "/api/videos/upload", true);
+    xhr.send(formData);
   };
 
   const togglePause = () => {
-    if (!uploadTask) return;
-    if (status === "uploading") {
-      uploadTask.pause();
-    } else if (status === "paused") {
-      uploadTask.resume();
-    }
+    // XMLHttpRequest doesn't support pause/resume natively. 
+    // We'll leave it as a no-op or hide the pause button.
   };
 
   return (
@@ -123,6 +129,8 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
             <div className="space-y-6">
               <div 
                 onClick={() => fileInputRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
                 className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${darkMode ? "border-slate-700 hover:border-slate-500 bg-slate-800/50" : "border-slate-300 hover:border-slate-400 bg-slate-50"}`}
               >
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="video/*" className="hidden" />

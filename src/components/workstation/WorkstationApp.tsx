@@ -74,8 +74,8 @@ export default function WorkstationApp({
 
         <div className="flex items-center gap-2 sm:gap-4">
           {isManagerOrAdmin && (
-            <button onClick={() => setShowUpload(true)} className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${darkMode ? "bg-slate-800 hover:bg-slate-700" : "bg-slate-100 hover:bg-slate-200"}`}>
-              <MonitorUp className="w-4 h-4" /> Upload
+            <button onClick={() => setShowUpload(true)} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-all ${darkMode ? "bg-slate-800 hover:bg-slate-700" : "bg-slate-100 hover:bg-slate-200"}`}>
+              <MonitorUp className="w-4 h-4" /> <span className="hidden sm:inline">Upload</span>
             </button>
           )}
           <button onClick={() => setDarkMode(!darkMode)} className={`p-2 rounded-full transition-colors ${darkMode ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-100 text-slate-500"}`}>

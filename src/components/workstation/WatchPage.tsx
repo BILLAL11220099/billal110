@@ -30,9 +30,9 @@ export default function WatchPage({ video, allVideos, onPlayAnother, onClose, da
   };
 
   const handleDownload = () => {
-    if (video.url) {
-      window.open(video.url, "_blank");
-    }
+    // Navigate to the backend endpoint which implements analytics 
+    // and securely redirects to the signed original cloud storage payload.
+    window.open(`/api/videos/${video.id}/download`, "_blank");
   };
 
   useEffect(() => {
