@@ -133,23 +133,32 @@ async function transcodeVideo(videoId: string, originalName: string) {
     }
   }
 
-  console.log(`[Storage] Retaining transcoded assets for ${videoId} locally on disk...`);
+  console.log(`[Storage] Uploading transcoded assets for ${videoId} to Firebase Cloud Storage...`);
   try {
      let mp4Url = "";
      let thumbUrl = "";
      let originalUrl = "";
 
      // Original
-     originalUrl = `/uploads/${videoId}/${originalName}`;
+     const ogRef = storageRef(fbStorage, `workstation/${videoId}/${originalName}`);
+     const ogBuffer = fs.readFileSync(sourcePath);
+     await uploadBytes(ogRef, new Uint8Array(ogBuffer));
+     originalUrl = await getDownloadURL(ogRef);
 
      // Thumbnail
      if (fs.existsSync(thumbnailPath)) {
-       thumbUrl = `/uploads/${videoId}/thumbnail.jpg`;
+       const thumbRef = storageRef(fbStorage, `workstation/${videoId}/thumbnail.jpg`);
+       const tbBuffer = fs.readFileSync(thumbnailPath);
+       await uploadBytes(thumbRef, new Uint8Array(tbBuffer), { contentType: "image/jpeg" });
+       thumbUrl = await getDownloadURL(thumbRef);
      }
 
      // MP4
      if (fs.existsSync(compatibleMp4Path)) {
-       mp4Url = `/uploads/${videoId}/compatible.mp4`;
+       const mp4Ref = storageRef(fbStorage, `workstation/${videoId}/compatible.mp4`);
+       const mp4Buffer = fs.readFileSync(compatibleMp4Path);
+       await uploadBytes(mp4Ref, new Uint8Array(mp4Buffer), { contentType: "video/mp4" });
+       mp4Url = await getDownloadURL(mp4Ref);
      } else {
        mp4Url = originalUrl;
      }
@@ -161,18 +170,31 @@ async function transcodeVideo(videoId: string, originalName: string) {
           url: mp4Url,
           downloadUrl: originalUrl
        }, { merge: true });
-       // Note: To preserve the colorful generated SVG if no thumbnail was generated via FFmpeg:
        if (thumbUrl) {
          await setDoc(doc(fbDb, "videos", videoId), { thumbnail: thumbUrl }, { merge: true });
        }
      }
 
-     console.log(`[Storage] Successfully recorded local URLs for ${videoId}`);
+     console.log(`[Storage] Successfully uploaded and recorded cloud URLs for ${videoId}`);
      
-     // IMPORTANT: Do NOT rmSync the local dir since we serve directly from it!
+     // Cleanup local files immediately to save container disk space since it's uploaded
+     fs.rmSync(dir, { recursive: true, force: true });
   } catch(err) {
-     console.error("[Storage] Failed to finalize transcoded files", err);
-     if(fbDb) await setDoc(doc(fbDb, "videos", videoId), { status: "Error", description: "Storage finalization fail" }, { merge: true });
+     console.error("[Storage] Failed to upload files to Cloud Storage, falling back to Local ephemeral URLs", err);
+     
+     const originalFallback = `/uploads/${videoId}/${originalName}`;
+     const mp4Fallback = fs.existsSync(compatibleMp4Path) ? `/uploads/${videoId}/compatible.mp4` : originalFallback;
+     const thumbFallback = fs.existsSync(thumbnailPath) ? `/uploads/${videoId}/thumbnail.jpg` : "";
+     
+     if(fbDb) {
+         await setDoc(doc(fbDb, "videos", videoId), { 
+             status: "Ready", 
+             progress: 100, 
+             url: mp4Fallback, 
+             downloadUrl: originalFallback,
+             ...(thumbFallback ? { thumbnail: thumbFallback } : {})
+         }, { merge: true });
+     }
   }
 }
 

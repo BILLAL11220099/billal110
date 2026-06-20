@@ -73,74 +73,83 @@ export default function UploadManager({ onClose, currentSession, onSaveVideo, da
     setStatus("uploading");
     
     const videoId = "vid_" + Date.now();
-    const storageRef = ref(storage, `workstation/${videoId}/${selectedFile.name}`);
-    const task = uploadBytesResumable(storageRef, selectedFile);
+    const chunkSize = 1 * 1024 * 1024; // 1MB chunks (smaller for safety)
+    const totalChunks = Math.ceil(selectedFile.size / chunkSize);
     
-    setUploadTask(task);
+    setStatus("uploading");
     
-    task.on("state_changed", 
-      (snapshot) => {
-        const p = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        setProgress(p);
-        switch (snapshot.state) {
-          case 'paused':
-            setStatus("paused");
-            break;
-          case 'running':
-            setStatus("uploading");
-            break;
-        }
-      },
-      (error) => {
-        setStatus("error");
-        setErrorMsg(error.message);
-      },
-      async () => {
-        setStatus("success");
+    const uploadChunk = async (chunkIndex: number) => {
+      if (chunkIndex >= totalChunks) {
+        // Finalize
         try {
-          const downloadURL = await getDownloadURL(task.snapshot.ref);
-          
-          // Generate realistic thumbnail
-          const colors = ["#22d3ee", "#a78bfa", "#ec4899", "#3b82f6", "#10b981", "#f59e0b"];
-          const displayTitle = title || "Untitled";
-          const baseColor = colors[Math.abs(displayTitle.charCodeAt(0) || 0) % colors.length] || "#22d3ee";
-          const escapedTitle = displayTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225" width="400" height="225"><rect width="100%" height="100%" fill="#020617"/><text x="50%" y="50%" text-anchor="middle" fill="#f8fafc" font-size="16" font-family="sans-serif">${escapedTitle}</text><text x="50%" y="70%" text-anchor="middle" fill="${baseColor}" font-size="10" font-family="monospace">READY</text></svg>`;
-          const thumbnail = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-
-          const newMeta: VideoMetadata = {
-            id: videoId,
-            title: displayTitle,
-            description,
-            category,
-            fileName: selectedFile.name,
-            fileSize: selectedFile.size,
-            fileType: selectedFile.type,
-            uploadedBy: currentSession.username,
-            uploadedRole: currentSession.role,
-            timestamp: new Date().toISOString(),
-            url: downloadURL,
-            downloadUrl: downloadURL,
-            thumbnail: thumbnail,
-            status: "Ready",
-            progress: 100,
-            views: 0,
-            downloads: 0,
-            likes: 0,
-            likedBy: []
-          };
-          
-          await setDoc(doc(db, "videos", videoId), newMeta);
-
-          setTimeout(() => {
-            onClose(); // Automatically close on success
-          }, 2000);
+          const res = await fetch("/api/videos/upload_finalize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: videoId,
+              originalName: selectedFile.name,
+              size: selectedFile.size,
+              type: selectedFile.type,
+              title,
+              description,
+              category,
+              uploadedBy: currentSession.username,
+              uploadedRole: currentSession.role,
+              totalChunks
+            })
+          });
+          if (res.ok) {
+            setStatus("success");
+            setTimeout(() => onClose(), 2000);
+          } else {
+            throw new Error(await res.text());
+          }
         } catch (err: any) {
           setStatus("error");
-          setErrorMsg(err.message || "Failed to finalize upload metadata.");
+          setErrorMsg("Finalization failed: " + (err.message || ""));
         }
+        return;
       }
-    );
+      
+      const start = chunkIndex * chunkSize;
+      const end = Math.min(start + chunkSize, selectedFile.size);
+      const chunk = selectedFile.slice(start, end);
+      
+      const formData = new FormData();
+      formData.append("id", videoId);
+      formData.append("chunkIndex", chunkIndex.toString());
+      formData.append("totalChunks", totalChunks.toString());
+      formData.append("chunk", chunk, "chunk_blob");
+      
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          const chunkProgress = e.loaded / e.total;
+          const overallProgress = ((chunkIndex + chunkProgress) / totalChunks) * 100;
+          setProgress(overallProgress);
+        }
+      });
+      
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          uploadChunk(chunkIndex + 1);
+        } else {
+          setStatus("error");
+          console.error("Upload error text:", xhr.responseText);
+          setErrorMsg("Failed on chunk " + chunkIndex + " (Status " + xhr.status + "): " + xhr.responseText);
+        }
+      });
+      
+      xhr.addEventListener("error", () => {
+        setStatus("error");
+        setErrorMsg("Network error on chunk " + chunkIndex);
+      });
+      
+      xhr.open("POST", "/api/videos/upload_chunk", true);
+      xhr.send(formData);
+    };
+    
+    uploadChunk(0);
   };
 
   const togglePause = () => {
