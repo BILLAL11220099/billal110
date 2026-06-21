@@ -11,6 +11,7 @@ import {
   Search, User, FileText, Video
 } from "lucide-react";
 import SecurityModal from "./SecurityModal";
+import heic2any from "heic2any";
 
 interface NewsFeedPanelProps {
   feed: NewsFeedPost[];
@@ -205,56 +206,104 @@ export default function NewsFeedPanel({
     setNewPostImageName("");
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
-    const file = e.target.files?.[0];
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
+    let file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const rawBase64 = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 1200; // 1200px is excellent for high quality and small size
-        let width = img.width;
-        let height = img.height;
+    // Reset the input so the same file could be selected again if needed
+    if (e.target) {
+      e.target.value = "";
+    }
 
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
+    try {
+      // 1. Process HEIC files if necessary
+      if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
+        const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 }) as Blob | Blob[];
+        const singleBlob = Array.isArray(converted) ? converted[0] : converted;
+        file = new File([singleBlob], file.name.replace(/\.heic$/i, ".jpg"), { type: "image/jpeg" });
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const rawBase64 = reader.result as string;
+        const img = new Image();
+        
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          // Dynamically scale down extremely large images to retain quality but prevent canvas crashes
+          const MAX_DIM = 4000;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
           }
-        }
 
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+
+          if (!ctx) {
+            // Unlikely to happen, but fallback if Canvas fails
+            finalizeImageUpload(rawBase64, isEdit);
+            return;
+          }
+
           ctx.drawImage(img, 0, 0, width, height);
-          // Compress to JPEG with 0.82 quality which gives incredible clarity at sub-200kB sizes
-          const compressedBase64 = canvas.toDataURL("image/jpeg", 0.82);
-          if (isEdit) {
-            setEditPostImage(compressedBase64);
-          } else {
-            setNewPostImage(compressedBase64);
-            analyzeUploadedImage(compressedBase64);
+
+          // 2. Compress recursively to ensure output remains under 900KB (Firestore 1MB limit safe threshold)
+          const MAX_STRING_SIZE = 900000; 
+          let quality = 0.95;
+          let compressedBase64 = canvas.toDataURL((file.type === "image/png") ? "image/png" : "image/jpeg", quality);
+
+          // Aggressive downscaling if image is still incredibly noisy/heavy
+          while (compressedBase64.length > MAX_STRING_SIZE && quality > 0.1) {
+            quality -= 0.15;
+            if (quality <= 0.2 && width > 800) {
+              width = Math.round(width * 0.7);
+              height = Math.round(height * 0.7);
+              canvas.width = width;
+              canvas.height = height;
+              ctx.drawImage(img, 0, 0, width, height);
+            }
+            compressedBase64 = canvas.toDataURL("image/jpeg", quality); // Fallback exclusively to JPEG to shrink size
           }
-        } else {
-          // Fallback if canvas is not supported
-          if (isEdit) {
-            setEditPostImage(rawBase64);
+
+          finalizeImageUpload(compressedBase64, isEdit);
+        };
+
+        img.onerror = () => {
+          // If image parsing completely fails but it's small enough, just try storing original
+          // E.g., if it's a PDF improperly accepted, or some vector format Canvas doesn't like.
+          if (rawBase64.length < 900000) {
+            finalizeImageUpload(rawBase64, isEdit);
           } else {
-            setNewPostImage(rawBase64);
-            analyzeUploadedImage(rawBase64);
+            console.error("Image too large and could not be parsed by browser native canvas.");
+            setAnalysisError("The selected file is too large and has an unsupported format. Please try a different photo.");
           }
-        }
+        };
+
+        img.src = rawBase64;
       };
-      img.src = rawBase64;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Failed to process image upload", err);
+      setAnalysisError("Failed to interpret image format. Please try another photo.");
+    }
+  };
+
+  const finalizeImageUpload = (base64Result: string, isEdit: boolean) => {
+    if (isEdit) {
+      setEditPostImage(base64Result);
+    } else {
+      setNewPostImage(base64Result);
+      analyzeUploadedImage(base64Result);
+    }
   };
 
   const handleLikePost = (postId: string) => {
