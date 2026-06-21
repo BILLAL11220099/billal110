@@ -242,6 +242,28 @@ export default function DailySystemPanel({
     localStorage.setItem("mcd_learning_progress", JSON.stringify(completedSteps));
   }, [completedSteps]);
 
+  // Real-time synchronization of completed/mastered steps with the Firestore checklist collection
+  useEffect(() => {
+    if (checklist) {
+      const allSteps = [...OPENING_STEPS, ...CLOSING_STEPS];
+      const completedFromDb = allSteps
+        .filter((step) => {
+          const matched = checklist.find((c) => c.id === step.id || c.task === step.title);
+          return matched ? matched.completed : false;
+        })
+        .map((step) => step.id);
+
+      setCompletedSteps((prev) => {
+        const prevSorted = [...prev].sort().join(",");
+        const dbSorted = [...completedFromDb].sort().join(",");
+        if (prevSorted !== dbSorted) {
+          return completedFromDb;
+        }
+        return prev;
+      });
+    }
+  }, [checklist]);
+
   // Handle Search Input Suggestions
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -299,13 +321,17 @@ export default function DailySystemPanel({
       const isCompleted = prev.includes(id);
       const next = isCompleted ? prev.filter(cId => cId !== id) : [...prev, id];
       
-      // We can also sync this with the main standard checklist structure to preserve general compliance logs
-      const correspondingChecklist = checklist.find(c => c.id === id);
-      if (correspondingChecklist || id) {
-        const standardChecklistTasks = checklist.map(item => {
-          if (item.id === id || item.task === (OPENING_STEPS.find(s => s.id === id)?.title || CLOSING_STEPS.find(s => s.id === id)?.title)) {
+      const stepDetail = OPENING_STEPS.find(s => s.id === id) || CLOSING_STEPS.find(s => s.id === id);
+      const existsInList = checklist.some(item => item.id === id || (stepDetail && item.task === stepDetail.title));
+      
+      let standardChecklistTasks: ChecklistItem[] = [];
+
+      if (existsInList) {
+        standardChecklistTasks = checklist.map(item => {
+          if (item.id === id || (stepDetail && item.task === stepDetail.title)) {
             return {
               ...item,
+              id: item.id || id,
               completed: !isCompleted,
               completedBy: !isCompleted ? currentSession.username : undefined,
               timeCompleted: !isCompleted ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined
@@ -313,8 +339,21 @@ export default function DailySystemPanel({
           }
           return item;
         });
-        onSave(standardChecklistTasks);
+      } else if (stepDetail) {
+        const newItem: ChecklistItem = {
+          id: id,
+          task: stepDetail.title,
+          category: activeSubTab === "closing" ? "Closing" : "Opening",
+          completed: !isCompleted,
+          completedBy: !isCompleted ? currentSession.username : undefined,
+          timeCompleted: !isCompleted ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined
+        };
+        standardChecklistTasks = [...checklist, newItem];
+      } else {
+        standardChecklistTasks = [...checklist];
       }
+
+      onSave(standardChecklistTasks);
       return next;
     });
   };

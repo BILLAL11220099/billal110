@@ -3,9 +3,6 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
-import { getFirestore, doc, setDoc, deleteDoc, getDocs, collection, getDoc, updateDoc } from "firebase/firestore";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -17,18 +14,6 @@ const ai = new GoogleGenAI({
 });
 
 const PORT = 3000;
-
-let fbApp: any, fbAuth: any, fbDb: any;
-try {
-  const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
-  fbApp = initializeApp(firebaseConfig);
-  fbAuth = getAuth(fbApp);
-  fbDb = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
-
-  signInAnonymously(fbAuth).catch(err => console.error("Firebase Backend Auth Error:", err));
-} catch (configErr) {
-  console.error("Critical: Could not load Firebase config locally on Server.", configErr);
-}
 
 async function startServer() {
   const app = express();

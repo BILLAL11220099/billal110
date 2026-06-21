@@ -220,6 +220,7 @@ export default function App() {
         const unsubProc = onSnapshot(
           collection(db, "procedures"),
           (snapshot) => {
+            console.log("Procedures subscription triggered");
             const list: CompanyProcedure[] = [];
             snapshot.docs.forEach((docSnap) => {
               const data = docSnap.data();
@@ -235,6 +236,7 @@ export default function App() {
                 });
               }
             });
+            list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
             updateCollectionState("procedures", list);
             setSyncStatus("connected");
           },
@@ -254,6 +256,7 @@ export default function App() {
         const unsubInv = onSnapshot(
           collection(db, "inventory"),
           (snapshot) => {
+            console.log("Inventory subscription triggered");
             const list: InventoryItem[] = [];
             snapshot.docs.forEach((docSnap) => {
               const data = docSnap.data();
@@ -273,6 +276,7 @@ export default function App() {
                 });
               }
             });
+            list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
             updateCollectionState("inventory", list);
             setSyncStatus("connected");
           },
@@ -292,6 +296,7 @@ export default function App() {
         const unsubChk = onSnapshot(
           collection(db, "checklist"),
           (snapshot) => {
+            console.log("Checklist subscription triggered");
             const list: ChecklistItem[] = [];
             snapshot.docs.forEach((docSnap) => {
               const data = docSnap.data();
@@ -306,6 +311,7 @@ export default function App() {
                 });
               }
             });
+            list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
             updateCollectionState("checklist", list);
             setSyncStatus("connected");
           },
@@ -325,6 +331,7 @@ export default function App() {
         const unsubFeed = onSnapshot(
           collection(db, "feed"),
           (snapshot) => {
+            console.log("Feed subscription triggered");
             const list: NewsFeedPost[] = [];
             snapshot.docs.forEach((docSnap) => {
               const data = docSnap.data();
